@@ -1,2 +1,6 @@
 # AID-demos
-Demonstrations of AI-Based Technologies by Analog Intelligent Design INc.
+Interactive AID AI Datasheet™ demonstrations by Analog Intelligent Design Inc.
+
+## Demos
+- Op-Amp — Folded Cascode
+- Power Inductor
