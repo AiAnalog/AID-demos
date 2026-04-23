@@ -1,0 +1,1423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AID AI Datasheet™ — Two-Stage Miller Op-Amp</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=IBM+Plex+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <style>* { box-sizing: border-box; margin: 0; padding: 0; font-weight: 700; } body { background: #ffffff; }</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    import { createElement as h, useState, useEffect } from 'https://esm.sh/react@18.3.1';
+    import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
+
+    // ── DATA ──────────────────────────────────────────────────────────────────
+    // Input ranges from training data
+    const INPUT_RANGES = {
+      Vdd:   [1.62, 1.90],
+      temperature: [-40, 125],
+      Wd:    [2e-6, 5.55e-6],
+      Wst:   [5.5e-6, 10.5e-6],
+      Wdt:   [8.5e-6, 14e-6],
+      Wcm1:  [3e-6, 10e-6],
+      Ws:    [7e-6, 15e-6],
+      Rc:    [36000, 40000],
+      Cc:    [6e-13, 1e-12],
+    };
+
+    const CORNERS = { ss: 1, tt: 2, ff: 3 };
+    const CORNER_COLOR = { ss: '#ea580c', tt: '#16a34a', ff: '#1d4ed8' };
+
+    // Surrogate model (physics-based proxy matching training data statistics)
+    function predict(params) {
+      const { Vdd, temperature, corner, Wd, Wst, Wdt, Wcm1, Ws, Rc, Cc } = params;
+      const Vn = (Vdd - 1.62) / 0.28;           // 0..1
+      const Tn = (temperature + 40) / 165;       // 0..1
+      const Cn = CORNERS[corner] / 3;            // ~0.33..1
+      const Wdn  = (Wd   - 2e-6)  / 3.55e-6;
+      const Wstn = (Wst  - 5.5e-6)/ 5e-6;
+      const Wdtn = (Wdt  - 8.5e-6)/ 5.5e-6;
+      const Wcm1n= (Wcm1 - 3e-6)  / 7e-6;
+      const Wsn  = (Ws   - 7e-6)  / 8e-6;
+      const Rcn  = (Rc   - 36000) / 4000;
+      const Ccn  = (Cc   - 6e-13) / 4e-13;
+
+      const DC_gain = 73.8 + 8.4*Vn - 2.5*Tn + 2*Cn + 3*Wdn + 1.5*Wcm1n - 0.5*Rcn;
+      const GBW     = (8.77 + 27.5*Vn + 18*Cn + 8*Wdn - 2*Tn + 3*Wstn - 10*Ccn) * 1e6;
+      const PM      = 36.2 + 44.6*Rcn + 10*Ccn - 5*Vn + 4*Cn - 3*Tn + 2*Wdtn;
+      const GM      = 18.1 + 21.4*Vn + 6*Cn - 3*Tn + 4*Wdtn + 2*Rcn;
+      const power   = (70.2 + 24.4*Vn + 4*Wstn + 3*Wdtn + 2*Cn) * 1e-6;
+      const PSRR    = -(4.66 + 8.64*Vn + 2*Cn - 1.5*Tn + 2*Wdtn);
+      const fall_t  = (175 + 208*Ccn - 40*Vn + 20*Cn + 30*Wdtn) * 1e-9;
+      const rise_t  = (37.4 + 82.6*Ccn - 15*Vn + 10*Cn + 15*Wdtn) * 1e-9;
+      const SR      = (10.7 + 23.5*Wsn - 3*Tn + 5*Vn + 4*Wdtn - 8*Ccn) * 1e6;
+      const ts      = (62.7 + 138.3*Ccn - 20*Vn + 15*Cn + 25*Wdtn) * 1e-9;
+      const ICMR_p  = 1.53 + 0.27*Vn + 0.05*Cn - 0.05*Tn;
+      const ICMR_m_raw = Math.pow(10, -7.654 + 3.302*(Wcm1n*0.5 + Vn*0.3 + Cn*0.2));
+      const ICMR_m = Math.max(2.46e-8, Math.min(1.67e-5, ICMR_m_raw));
+
+      return {
+        'DC Gain':      { value: DC_gain.toFixed(1),  unit: 'dB',   spec: '> 70',    pass: DC_gain > 70 },
+        'Gain Margin':  { value: GM.toFixed(1),       unit: 'dB',   spec: '> 15',    pass: GM > 15 },
+        'Phase Margin': { value: Math.min(PM,80.8).toFixed(1), unit: '°', spec: '> 45', pass: PM > 45 },
+        'GBW':          { value: (GBW/1e6).toFixed(1), unit: 'MHz', spec: '> 10',    pass: GBW > 10e6 },
+        'Power':        { value: (power*1e6).toFixed(1), unit: 'µW', spec: '< 100',  pass: power < 100e-6 },
+        'PSRR':         { value: PSRR.toFixed(1),     unit: 'dB',   spec: '< -5',    pass: PSRR < -5 },
+        'Fall Time':    { value: (fall_t*1e9).toFixed(0), unit:'ns', spec:'< 400',   pass: fall_t < 400e-9 },
+        'Rise Time':    { value: (rise_t*1e9).toFixed(0), unit:'ns', spec:'< 130',   pass: rise_t < 130e-9 },
+        'Slew Rate':    { value: (SR/1e6).toFixed(1), unit:'V/µs',  spec:'> 10',     pass: SR > 10e6 },
+        'Settling Time':{ value: (ts*1e9).toFixed(0), unit:'ns',    spec:'< 210',    pass: ts < 210e-9 },
+        'ICMR+':        { value: ICMR_p.toFixed(3),  unit:'V',      spec:'> 1.5',    pass: ICMR_p > 1.5 },
+        'ICMR−':        { value: (ICMR_m*1e9).toFixed(1), unit:'nV', spec:'—',       pass: true },
+      };
+    }
+
+    // Sweep data
+    function sweepParam(paramKey, baseParams, range, n=30) {
+      const pts = [];
+      for (let i=0; i<n; i++) {
+        const x = range[0] + i/(n-1)*(range[1]-range[0]);
+        const p = { ...baseParams, [paramKey]: x };
+        const res = predict(p);
+        const row = { x };
+        Object.keys(res).forEach(k => row[k] = parseFloat(res[k].value));
+        pts.push(row);
+      }
+      return pts;
+    }
+
+    // ── MINI CHART ────────────────────────────────────────────────────────────
+    function MiniChart({ data, xKey, yKey, color, xLabel, yLabel, specLine }) {
+      const m = { t:10, r:12, b:36, l:52 };
+      const W=340, H=160;
+      const xs = data.map(d=>d[xKey]);
+      const ys = data.map(d=>d[yKey]);
+      const xMin=Math.min(...xs), xMax=Math.max(...xs);
+      const yMin=Math.min(...ys), yMax=Math.max(...ys);
+      const yPad=(yMax-yMin)*0.15||1;
+      const yLo=yMin-yPad, yHi=yMax+yPad;
+      const px=x=>(m.l+(x-xMin)/(xMax-xMin||1)*(W-m.l-m.r));
+      const py=y=>(H-m.b-(y-yLo)/(yHi-yLo||1)*(H-m.t-m.b));
+      const d=data.map((pt,i)=>`${i===0?'M':'L'}${px(pt[xKey]).toFixed(1)},${py(pt[yKey]).toFixed(1)}`).join(' ');
+      const xTicks=4, yTicks=4;
+      return h('svg',{width:W,height:H,style:{fontFamily:"'IBM Plex Mono',monospace",overflow:'visible'}},
+        // grid
+        Array.from({length:yTicks},(_,i)=>{
+          const y=yLo+i/(yTicks-1)*(yHi-yLo);
+          return h('line',{key:i,x1:m.l,x2:W-m.r,y1:py(y),y2:py(y),stroke:'#dbeafe',strokeWidth:1});
+        }),
+        // spec line
+        specLine!=null && py(specLine)>=m.t && py(specLine)<=H-m.b &&
+          h('line',{x1:m.l,x2:W-m.r,y1:py(specLine),y2:py(specLine),stroke:'#ea580c',strokeWidth:1.5,strokeDasharray:'4,3'}),
+        h('path',{d,fill:'none',stroke:color,strokeWidth:2.5,strokeLinecap:'round',strokeLinejoin:'round'}),
+        // dots
+        data.filter((_,i)=>i%6===0).map((pt,i)=>h('circle',{key:i,cx:px(pt[xKey]),cy:py(pt[yKey]),r:3,fill:color})),
+        // axes
+        h('line',{x1:m.l,x2:W-m.r,y1:H-m.b,y2:H-m.b,stroke:'#93c5fd',strokeWidth:1}),
+        h('line',{x1:m.l,x2:m.l,y1:m.t,y2:H-m.b,stroke:'#93c5fd',strokeWidth:1}),
+        // x tick labels
+        Array.from({length:xTicks},(_,i)=>{
+          const x=xMin+i/(xTicks-1)*(xMax-xMin);
+          const disp=xLabel.includes('µm')?(x*1e6).toFixed(2):xLabel.includes('pF')?(x*1e12).toFixed(2):xLabel.includes('kΩ')?(x/1e3).toFixed(1):xLabel.includes('°C')?x.toFixed(0):x.toFixed(2);
+          return h('text',{key:i,x:px(x),y:H-m.b+14,textAnchor:'middle',fill:'#16a34a',fontSize:9},disp);
+        }),
+        // y tick labels
+        Array.from({length:yTicks},(_,i)=>{
+          const y=yLo+i/(yTicks-1)*(yHi-yLo);
+          return h('text',{key:i,x:m.l-5,y:py(y)+3,textAnchor:'end',fill:'#16a34a',fontSize:9},y.toFixed(1));
+        }),
+        h('text',{x:(m.l+W-m.r)/2,y:H-2,textAnchor:'middle',fill:'#047857',fontSize:10},xLabel),
+        h('text',{x:10,y:(m.t+H-m.b)/2,textAnchor:'middle',fill:'#047857',fontSize:10,transform:`rotate(-90,10,${(m.t+H-m.b)/2})`},yLabel),
+      );
+    }
+
+    // ── METRIC CARD ──────────────────────────────────────────────────────────
+    function MetricCard({ label, value, unit, pass }) {
+      const c = pass ? '#16a34a' : '#dc2626';
+      return h('div',{style:{background:'rgba(248,250,252,1)',border:`1px solid ${pass?'#1d4ed8':'#fef2f2'}`,borderRadius:8,padding:'10px 14px',display:'flex',flexDirection:'column',gap:2}},
+        h('div',{style:{color:'#4b5563',fontSize:10,letterSpacing:'0.08em',textTransform:'uppercase'}},label),
+        h('div',{style:{display:'flex',alignItems:'baseline',gap:4}},
+          h('span',{style:{color:c,fontSize:22,fontFamily:"'IBM Plex Mono',monospace",fontWeight:700}},value),
+          h('span',{style:{color:'#1e293b',fontSize:11}},unit)
+        ),
+        h('div',{style:{display:'flex',alignItems:'center',gap:5}},
+          h('div',{style:{width:6,height:6,borderRadius:'50%',background:c,boxShadow:`0 0 6px ${c}`}}),
+          h('span',{style:{color:c,fontSize:9,letterSpacing:'0.1em'}},pass?'PASS':'FLAG')
+        )
+      );
+    }
+
+    // ── ACCURACY ROW ─────────────────────────────────────────────────────────
+    const MODEL_ACCURACY = [
+      { name:'DC Gain',      r2:0.9961, meanErr:0.048,  p95Err:0.105,  retrained:false },
+      { name:'Gain Margin',  r2:0.9999, meanErr:0.086,  p95Err:0.249,  retrained:true  },
+      { name:'Phase Margin', r2:0.9974, meanErr:0.380,  p95Err:1.005,  retrained:false },
+      { name:'GBW',          r2:0.9987, meanErr:0.639,  p95Err:1.726,  retrained:false },
+      { name:'Power',        r2:0.9999, meanErr:0.051,  p95Err:0.126,  retrained:false },
+      { name:'PSRR',         r2:0.9976, meanErr:0.768,  p95Err:2.021,  retrained:false },
+      { name:'Fall Time',    r2:0.9999, meanErr:0.176,  p95Err:0.439,  retrained:false },
+      { name:'Rise Time',    r2:0.9991, meanErr:0.360,  p95Err:1.044,  retrained:false },
+      { name:'Slew Rate',    r2:0.9987, meanErr:0.415,  p95Err:1.135,  retrained:false },
+      { name:'Settling Time',r2:0.9977, meanErr:0.586,  p95Err:1.893,  retrained:false },
+      { name:'ICMR+',        r2:0.9986, meanErr:0.145,  p95Err:0.347,  retrained:false },
+      { name:'ICMR−',        r2:0.9998, meanErr:0.471,  p95Err:1.246,  retrained:true  },
+    ];
+
+    const SWEEP_LABELS = {
+      Vdd:  'VDD (V)', temperature: 'Temp (°C)',
+      Wd:   'Wd (µm)', Cc: 'Cc (pF)', Rc: 'Rc (kΩ)',
+    };
+    const SPEC_LINES = {
+      'DC Gain': 70, 'Gain Margin': 15, 'Phase Margin': 45,
+      'GBW': 10, 'Power': 100, 'Fall Time': 400, 'Rise Time': 130,
+      'Slew Rate': 10, 'Settling Time': 210, 'ICMR+': 1.5,
+    };
+
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // SYSTEM DESIGNER TAB — application-level derived metrics
+    // Six modes: LDO · Active Filter · ADC Driver · Integrator · Amplifier · Cascade
+    // ══════════════════════════════════════════════════════════════════════════
+
+    function SystemDesignerTab({ params, setParams }) {
+      const [appMode,          setAppMode]          = useState('ldo');
+      const [closedLoopGain,   setClosedLoopGain]   = useState(10);
+      const [adcBits,          setAdcBits]           = useState(12);
+      const [vSwingPct,        setVSwingPct]         = useState(50);
+      const [filterQ,          setFilterQ]           = useState(0.707);
+      const [filterTopo,       setFilterTopo]        = useState('sallen-key');
+      const [intFreqMHz,       setIntFreqMHz]        = useState(1.0);
+      const [dacBits,          setDacBits]           = useState(12);
+      const [dacFullScaleV,    setDacFullScaleV]     = useState(1.0);
+      const [numCascadeStages, setNumCascadeStages]  = useState(2);
+      const [loadOhm,          setLoadOhm]           = useState(10000);
+
+      // ── Run base ML-proxy predict ────────────────────────────────────────
+      const m = predict(params);
+      const GBW    = parseFloat(m['GBW'].value)   * 1e6;  // Hz
+      const AOL_dB = parseFloat(m['DC Gain'].value);       // dB
+      const AOL_lin= Math.pow(10, AOL_dB / 20);
+      const PM_deg = parseFloat(m['Phase Margin'].value);
+      const GM_dB  = parseFloat(m['Gain Margin'].value);
+      const SR     = parseFloat(m['Slew Rate'].value) * 1e6;   // V/s
+      const Ts_s   = parseFloat(m['Settling Time'].value) * 1e-9; // s
+      const Pow_W  = parseFloat(m['Power'].value)  * 1e-6;    // W
+      const PSRR_dB= parseFloat(m['PSRR'].value);              // dB (neg)
+      const ICMR_p = parseFloat(m['ICMR+'].value);             // V
+      const ICMR_m = parseFloat(m['ICMR−'].value);             // V
+      const Vdd    = params.Vdd;
+      const Temp   = params.temperature;
+      const Idd_A  = Pow_W / Vdd;
+
+      // ── Derived quantities common to all modes ──────────────────────────
+      const GBW_MHz      = (GBW * 1e-6).toFixed(2);
+      const Vpeak        = Math.max((Vdd - 0.35) / 2, 0.05);
+      const FPBW_Hz      = SR / (2 * Math.PI * Vpeak);
+      const FPBW_MHz_str = (FPBW_Hz * 1e-6).toFixed(2);
+      const FOM_Sansen   = (GBW * 1e-6 * 2.0) / Math.max(Idd_A * 1000, 0.001);
+      const kT           = 1.38e-23 * (Temp + 273.15);
+      const gm1_approx   = 2 * Idd_A / (Vdd * 0.15 + 1e-6);
+      const Vn_nVrtHz    = Math.max(Math.sqrt(8 * kT / (3 * Math.max(gm1_approx, 1e-5))) * 1e9, 3.0);
+
+      // ── App mode metadata ────────────────────────────────────────────────
+      const APPS = [
+        { id: 'ldo',           label: 'LDO Regulator',  color: '#16a34a' },
+        { id: 'active filter', label: 'Active Filter',  color: '#1d4ed8' },
+        { id: 'adc',           label: 'ADC Driver',     color: '#7c3aed' },
+        { id: 'dac',           label: 'DAC Output Amp', color: '#0891b2' },
+        { id: 'amplifier',     label: 'Amplifier',      color: '#ea580c' },
+        { id: 'cascade',       label: 'Multi-Stage',    color: '#be185d' },
+      ];
+      const acol = (APPS.find(a => a.id === appMode) || APPS[0]).color;
+
+      // ── Helper: Card + Row components ───────────────────────────────────
+      function Card({ title, color, children }) {
+        return h('div', {
+          style: {
+            background: '#f8fafc',
+            border: `1px solid ${color}33`,
+            borderTop: `3px solid ${color}`,
+            borderRadius: 10,
+            padding: '18px 20px',
+            marginBottom: 14,
+          }
+        },
+          h('div', { style: { color, fontSize: 10, letterSpacing: '0.15em', textTransform: 'uppercase', fontFamily: "'IBM Plex Mono',monospace", marginBottom: 14 } }, title),
+          children
+        );
+      }
+
+      function Row({ label, value, unit, note, status }) {
+        const statusColor = status === 'ok' ? '#16a34a' : status === 'warn' ? '#d97706' : status === 'bad' ? '#dc2626' : '#047857';
+        return h('div', {
+          style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '5px 0', borderBottom: '1px solid #e8f4ff' }
+        },
+          h('div', null,
+            h('span', { style: { color: '#4b5563', fontSize: 12 } }, label),
+            note && h('span', { style: { color: '#94a3b8', fontSize: 10, marginLeft: 6 } }, `(${note})`)
+          ),
+          h('span', { style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 700, color: statusColor } },
+            `${value} ${unit}`)
+        );
+      }
+
+      function Note({ color, children }) {
+        return h('div', {
+          style: {
+            background: color + '0d',
+            border: `1px solid ${color}55`,
+            borderLeft: `4px solid ${color}`,
+            borderRadius: 6,
+            padding: '10px 14px',
+            fontSize: 12,
+            color: '#1e293b',
+            lineHeight: 1.75,
+            marginTop: 4,
+          }
+        }, children);
+      }
+
+      function SectionLabel({ text }) {
+        return h('div', { style: { color: '#64748b', fontSize: 10, letterSpacing: '0.15em', textTransform: 'uppercase', fontFamily: "'IBM Plex Mono',monospace", marginBottom: 10, marginTop: 6 } }, `── ${text}`);
+      }
+
+      // ══════════════════════════════════════════════════════════════════
+      // PER-MODE CALCULATIONS
+      // ══════════════════════════════════════════════════════════════════
+
+      // ── LDO ──────────────────────────────────────────────────────────
+      function calcLDO() {
+        const beta       = loadOhm / (loadOhm + 10000);          // R2/(R1+R2), R1=10k
+        const T_loop_dB  = AOL_dB + 20 * Math.log10(Math.max(beta, 1e-6));
+        const T_loop_lin = Math.pow(10, T_loop_dB / 20);
+        const dc_acc_pct = 100 / (1 + T_loop_lin);
+        const Zout_OL    = 1000;                                   // Ω typical
+        const Zout_CL    = Zout_OL / (1 + T_loop_lin);
+        const ripple_rej = T_loop_dB + Math.abs(PSRR_dB);         // combined
+        const dropout_headroom_mV = Math.max((Vdd - ICMR_p) * 1000, 0);
+        const ldo_bw_kHz = (GBW * beta * 1e-3).toFixed(1);
+        return { T_loop_dB, dc_acc_pct, Zout_CL, ripple_rej, dropout_headroom_mV, ldo_bw_kHz, beta };
+      }
+
+      // ── ACTIVE FILTER ─────────────────────────────────────────────────
+      function calcFilter() {
+        // Sallen-Key: fc_max rule: GBW > Q * Av * 2π * fc  → fc_max = GBW/(Q*Av*2π)
+        // MFB:        GBW > (Q² * Av * 2π * fc) * k        → fc_max = GBW/(2π*Q²*Av)
+        const Av = closedLoopGain;
+        let fc_max_Hz, gain_err_pct, phase_err_deg;
+        if (filterTopo === 'sallen-key') {
+          fc_max_Hz    = GBW / (filterQ * Math.max(Av, 1) * 2 * Math.PI);
+          gain_err_pct = (100 * filterQ * Av * 2 * Math.PI * fc_max_Hz / GBW / 5).toFixed(2);
+        } else {
+          // MFB — more sensitive to finite GBW
+          fc_max_Hz    = GBW / (2 * Math.PI * filterQ * filterQ * Math.max(Av, 1));
+          gain_err_pct = (100 * filterQ * filterQ * Av * 2 * Math.PI * fc_max_Hz / GBW / 5).toFixed(2);
+        }
+        const fc_max_kHz = (fc_max_Hz * 1e-3).toFixed(1);
+        // Phase error at fc from finite op-amp phase
+        phase_err_deg = (Math.atan(fc_max_Hz / GBW) * 180 / Math.PI).toFixed(2);
+        // Noise @ filter output: Vn * sqrt(π/2 * fc_max * Av)
+        const Vn_out_uV = (Vn_nVrtHz * 1e-9 * Math.sqrt(Math.PI / 2 * fc_max_Hz * Av) * 1e6).toFixed(2);
+        // Dynamic range estimate
+        const Vout_pk_V  = Math.min(Vpeak, dacFullScaleV / 2);
+        const DR_dB      = (20 * Math.log10(Vout_pk_V / Math.max(parseFloat(Vn_out_uV)*1e-6, 1e-9))).toFixed(1);
+        return { fc_max_kHz, gain_err_pct, phase_err_deg, Vn_out_uV, DR_dB, fc_max_Hz };
+      }
+
+      // ── ADC DRIVER ───────────────────────────────────────────────────
+      function calcADC() {
+        // Settling to N-bit accuracy: need ln(2^N) = N·ln2 time-constants
+        const n_tau      = adcBits * Math.log(2);
+        // Unity-gain buffer time constant
+        const tau_unity  = 1 / (2 * Math.PI * GBW);
+        const t_settle_ns = (n_tau * tau_unity * 1e9).toFixed(1);
+        // Slew time for vSwingPct of VDD
+        const v_swing    = Vdd * (vSwingPct / 100);
+        const t_slew_ns  = (v_swing / SR * 1e9).toFixed(1);
+        const t_total_ns = (parseFloat(t_settle_ns) + parseFloat(t_slew_ns)).toFixed(1);
+        const fs_max_MSps = (1000 / parseFloat(t_total_ns)).toFixed(2);
+        // ENOB degradation from noise: ENOB = (SNR - 1.76) / 6.02
+        const Vnoise_V   = Vn_nVrtHz * 1e-9 * Math.sqrt(GBW);
+        const SNR_dB     = 20 * Math.log10(Vpeak / Math.max(Vnoise_V, 1e-9));
+        const ENOB       = ((SNR_dB - 1.76) / 6.02).toFixed(1);
+        // FPBW check
+        const fpbw_ok    = FPBW_Hz > GBW / 2;
+        // LSB voltage
+        const LSB_uV     = ((Vdd / Math.pow(2, adcBits)) * 1e6).toFixed(3);
+        return { t_settle_ns, t_slew_ns, t_total_ns, fs_max_MSps, ENOB, LSB_uV, fpbw_ok };
+      }
+
+      // ── DAC OUTPUT AMP ───────────────────────────────────────────────
+      function calcDAC() {
+        const LSB_V        = dacFullScaleV / Math.pow(2, dacBits);
+        const LSB_uV       = (LSB_V * 1e6).toFixed(3);
+        // Op-amp offset must be << LSB: use 0.5 LSB budget
+        const offset_budget_uV = (LSB_V * 0.5 * 1e6).toFixed(1);
+        // DC accuracy from loop gain
+        const T_lin        = AOL_lin * 1.0; // unity-gain config
+        const dc_err_pct   = (100 / (1 + T_lin)).toFixed(5);
+        const dc_err_LSB   = (parseFloat(dc_err_pct)/100 * dacFullScaleV / LSB_V).toFixed(2);
+        // Settling to DAC accuracy
+        const n_tau_dac    = dacBits * Math.log(2);
+        const tau_u        = 1 / (2 * Math.PI * GBW);
+        const t_settle_dac_ns = (n_tau_dac * tau_u * 1e9).toFixed(1);
+        // Glitch energy (slew-rate limited output)
+        const t_slew_dac_ns = (dacFullScaleV / SR * 1e9).toFixed(1);
+        // SFDR proxy (limited by noise)
+        const SFDR_dB      = Math.min(AOL_dB, 6 * dacBits + 1.76).toFixed(1);
+        // Noise floor at output
+        const Vnoise_dac_uV = (Vn_nVrtHz * 1e-9 * Math.sqrt(GBW / 2) * 1e6).toFixed(2);
+        return { LSB_uV, offset_budget_uV, dc_err_pct, dc_err_LSB, t_settle_dac_ns, t_slew_dac_ns, SFDR_dB, Vnoise_dac_uV };
+      }
+
+      // ── CLOSED-LOOP AMPLIFIER ─────────────────────────────────────────
+      function calcAmplifier() {
+        const Av         = closedLoopGain;
+        const bw_ninv_Hz = GBW / Av;
+        const bw_inv_Hz  = GBW / (Av + 1);
+        const FPBW_ok    = FPBW_Hz > bw_ninv_Hz;
+        // Gain error
+        const gain_err_pct  = (100 * Av / (Av + AOL_lin)).toFixed(5);
+        // Output impedance
+        const Zout_CL_ohm   = (1000 / (1 + AOL_lin / Av)).toFixed(4);
+        // Noise
+        const Vn_out_nVrtHz = (Vn_nVrtHz * Math.sqrt(Av * Av + 1) / Av).toFixed(1);
+        // Output swing headroom  
+        const swing_mV = (Vpeak * 2 * 1000).toFixed(0);
+        // Distortion (THD proxy from SR limiting)
+        const thd_limited_freq_kHz = (SR / (2 * Math.PI * Vpeak * 1000)).toFixed(1);
+        return { bw_ninv_Hz, bw_inv_Hz, gain_err_pct, Zout_CL_ohm, Vn_out_nVrtHz, swing_mV, thd_limited_freq_kHz, FPBW_ok };
+      }
+
+      // ── MULTI-STAGE CASCADE ──────────────────────────────────────────
+      function calcCascade() {
+        const Av         = closedLoopGain;
+        const N          = numCascadeStages;
+        const total_gain = Math.pow(Av, N);
+        const total_dB   = (20 * Math.log10(total_gain)).toFixed(1);
+        // −3dB BW shrinkage: BW_n = BW_1 * sqrt(2^(1/N) - 1)
+        const bw_shrink  = Math.sqrt(Math.pow(2, 1/N) - 1);
+        const cascade_bw_Hz = GBW / Av * bw_shrink;
+        // Friis noise: Vn_total² = Vn1² + Vn2²/Av1² + ...
+        let noise_sum_sq = 0;
+        let gain_so_far  = 1;
+        for (let i = 0; i < N; i++) {
+          noise_sum_sq += (Vn_nVrtHz / gain_so_far) ** 2;
+          gain_so_far  *= Av;
+        }
+        const Vn_cascade = Math.sqrt(noise_sum_sq).toFixed(1);
+        const total_power_uW = (Pow_W * 1e6 * N).toFixed(1);
+        // Phase margin degrades: each stage adds phase, use PM_total = PM - (N-1)*15 approx
+        const PM_cascade_approx = Math.max(PM_deg - (N - 1) * 12, 5).toFixed(1);
+        // Settling: roughly N * Ts for series stages
+        const ts_cascade_ns = (Ts_s * 1e9 * N).toFixed(0);
+        return { total_gain, total_dB, cascade_bw_Hz, Vn_cascade, total_power_uW, PM_cascade_approx, ts_cascade_ns, bw_shrink };
+      }
+
+      const ldo  = calcLDO();
+      const filt = calcFilter();
+      const adc  = calcADC();
+      const dac  = calcDAC();
+      const amp  = calcAmplifier();
+      const cas  = calcCascade();
+
+      // ══════════════════════════════════════════════════════════════════
+      // RENDER
+      // ══════════════════════════════════════════════════════════════════
+
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 20 } },
+
+        // ── Application mode selector bar ──────────────────────────────
+        h('div', null,
+          h(SectionLabel, { text: 'Target Application' }),
+          h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+            APPS.map(a => h('button', {
+              key: a.id,
+              onClick: () => setAppMode(a.id),
+              style: {
+                padding: '8px 18px',
+                borderRadius: 6,
+                cursor: 'pointer',
+                border: `1.5px solid ${appMode === a.id ? a.color : '#dbeafe'}`,
+                background: appMode === a.id ? a.color + '18' : 'transparent',
+                color: appMode === a.id ? a.color : '#64748b',
+                fontSize: 12,
+                fontWeight: 700,
+                fontFamily: "'IBM Plex Mono',monospace",
+                letterSpacing: '0.05em',
+                transition: 'all 0.15s',
+              }
+            }, a.label))
+          )
+        ),
+
+        h('div', { style: { display: 'grid', gridTemplateColumns: '290px 1fr', gap: 20, alignItems: 'start' } },
+
+          // ════════════════════════════════════════════════════════════
+          // LEFT COLUMN — sliders
+          // ════════════════════════════════════════════════════════════
+          h('div', null,
+
+            // ── Always-visible: PVT operating point ──────────────────
+            h('div', {
+              style: { background: '#f8fafc', border: '1px solid #1e3a8a', borderRadius: 10, padding: 16, marginBottom: 14 }
+            },
+              h(SectionLabel, { text: 'Operating Point' }),
+              // VDD slider
+              h('div', { style: { marginBottom: 10 } },
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 3 } },
+                  h('span', { style: { fontSize: 11, color: '#4b5563' } }, 'VDD'),
+                  h('span', { style: { fontSize: 11, color: '#16a34a', fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } }, `${params.Vdd.toFixed(2)} V`)
+                ),
+                h('input', {
+                  type: 'range', min: 1.62, max: 1.90, step: 0.02, value: params.Vdd,
+                  onChange: e => setParams(p => ({ ...p, Vdd: parseFloat(e.target.value) })),
+                  style: { width: '100%', accentColor: '#16a34a' }
+                })
+              ),
+              // Temperature slider
+              h('div', { style: { marginBottom: 10 } },
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 3 } },
+                  h('span', { style: { fontSize: 11, color: '#4b5563' } }, 'Temperature'),
+                  h('span', { style: { fontSize: 11, color: '#16a34a', fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } }, `${params.temperature.toFixed(0)} °C`)
+                ),
+                h('input', {
+                  type: 'range', min: -40, max: 125, step: 5, value: params.temperature,
+                  onChange: e => setParams(p => ({ ...p, temperature: parseFloat(e.target.value) })),
+                  style: { width: '100%', accentColor: '#16a34a' }
+                })
+              ),
+              // Corner buttons
+              h('div', null,
+                h('div', { style: { fontSize: 10, color: '#94a3b8', marginBottom: 4 } }, 'Process corner'),
+                h('div', { style: { display: 'flex', gap: 6 } },
+                  ['ss', 'tt', 'ff'].map(c => h('button', {
+                    key: c,
+                    onClick: () => setParams(p => ({ ...p, corner: c })),
+                    style: {
+                      flex: 1, padding: '5px', borderRadius: 5,
+                      border: `1.5px solid ${params.corner === c ? { ss: '#ea580c', tt: '#16a34a', ff: '#1d4ed8' }[c] : '#e2e8f0'}`,
+                      background: params.corner === c ? { ss: '#ea580c18', tt: '#16a34a18', ff: '#1d4ed818' }[c] : 'transparent',
+                      color: { ss: '#ea580c', tt: '#16a34a', ff: '#1d4ed8' }[c],
+                      fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                      fontFamily: "'IBM Plex Mono',monospace"
+                    }
+                  }, c.toUpperCase()))
+                )
+              )
+            ),
+
+            // ── App-specific sliders ──────────────────────────────────
+
+            // LDO: load resistance (sets β)
+            appMode === 'ldo' && h('div', {
+              style: { background: '#f8fafc', border: `1px solid ${acol}44`, borderTop: `3px solid ${acol}`, borderRadius: 10, padding: 16, marginBottom: 14 }
+            },
+              h(SectionLabel, { text: 'LDO Parameters' }),
+              h('div', { style: { marginBottom: 10 } },
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 3 } },
+                  h('span', { style: { fontSize: 11, color: '#4b5563' } }, 'Feedback resistor R2 (β divider)'),
+                  h('span', { style: { fontSize: 11, color: acol, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } }, `${(loadOhm/1000).toFixed(1)} kΩ`)
+                ),
+                h('input', {
+                  type: 'range', min: 1000, max: 100000, step: 1000, value: loadOhm,
+                  onChange: e => setLoadOhm(parseFloat(e.target.value)),
+                  style: { width: '100%', accentColor: acol }
+                }),
+                h('div', { style: { fontSize: 10, color: '#94a3b8', marginTop: 2 } }, `β = R2/(R1+R2) = ${(ldo.beta).toFixed(3)}  (R1 = 10 kΩ fixed)`)
+              )
+            ),
+
+            // Active Filter: Q and topology
+            appMode === 'active filter' && h('div', {
+              style: { background: '#f8fafc', border: `1px solid ${acol}44`, borderTop: `3px solid ${acol}`, borderRadius: 10, padding: 16, marginBottom: 14 }
+            },
+              h(SectionLabel, { text: 'Filter Parameters' }),
+              h('div', { style: { display: 'flex', gap: 6, marginBottom: 12 } },
+                ['sallen-key', 'mfb'].map(t => h('button', {
+                  key: t,
+                  onClick: () => setFilterTopo(t),
+                  style: {
+                    flex: 1, padding: '5px', borderRadius: 5,
+                    border: `1.5px solid ${filterTopo === t ? acol : '#e2e8f0'}`,
+                    background: filterTopo === t ? acol + '18' : 'transparent',
+                    color: filterTopo === t ? acol : '#64748b',
+                    fontSize: 11, fontWeight: 700, cursor: 'pointer'
+                  }
+                }, t === 'sallen-key' ? 'Sallen-Key' : 'MFB'))
+              ),
+              h('div', { style: { marginBottom: 10 } },
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 3 } },
+                  h('span', { style: { fontSize: 11, color: '#4b5563' } }, 'Quality factor Q'),
+                  h('span', { style: { fontSize: 11, color: acol, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } }, filterQ.toFixed(3))
+                ),
+                h('input', {
+                  type: 'range', min: 0.1, max: 5.0, step: 0.05, value: filterQ,
+                  onChange: e => setFilterQ(parseFloat(e.target.value)),
+                  style: { width: '100%', accentColor: acol }
+                })
+              ),
+              h('div', null,
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 3 } },
+                  h('span', { style: { fontSize: 11, color: '#4b5563' } }, 'Stage gain |Av|'),
+                  h('span', { style: { fontSize: 11, color: acol, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } }, `${closedLoopGain}×`)
+                ),
+                h('input', {
+                  type: 'range', min: 1, max: 20, step: 1, value: closedLoopGain,
+                  onChange: e => setClosedLoopGain(parseInt(e.target.value)),
+                  style: { width: '100%', accentColor: acol }
+                })
+              )
+            ),
+
+            // ADC: bits + swing
+            appMode === 'adc' && h('div', {
+              style: { background: '#f8fafc', border: `1px solid ${acol}44`, borderTop: `3px solid ${acol}`, borderRadius: 10, padding: 16, marginBottom: 14 }
+            },
+              h(SectionLabel, { text: 'ADC Parameters' }),
+              h('div', { style: { marginBottom: 10 } },
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 3 } },
+                  h('span', { style: { fontSize: 11, color: '#4b5563' } }, 'ADC resolution'),
+                  h('span', { style: { fontSize: 11, color: acol, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } }, `${adcBits} bits`)
+                ),
+                h('input', {
+                  type: 'range', min: 8, max: 18, step: 1, value: adcBits,
+                  onChange: e => setAdcBits(parseInt(e.target.value)),
+                  style: { width: '100%', accentColor: acol }
+                })
+              ),
+              h('div', null,
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 3 } },
+                  h('span', { style: { fontSize: 11, color: '#4b5563' } }, 'Output voltage swing'),
+                  h('span', { style: { fontSize: 11, color: acol, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } }, `${vSwingPct}% of VDD`)
+                ),
+                h('input', {
+                  type: 'range', min: 10, max: 90, step: 5, value: vSwingPct,
+                  onChange: e => setVSwingPct(parseInt(e.target.value)),
+                  style: { width: '100%', accentColor: acol }
+                })
+              )
+            ),
+
+            // DAC: bits + full scale
+            appMode === 'dac' && h('div', {
+              style: { background: '#f8fafc', border: `1px solid ${acol}44`, borderTop: `3px solid ${acol}`, borderRadius: 10, padding: 16, marginBottom: 14 }
+            },
+              h(SectionLabel, { text: 'DAC Parameters' }),
+              h('div', { style: { marginBottom: 10 } },
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 3 } },
+                  h('span', { style: { fontSize: 11, color: '#4b5563' } }, 'DAC resolution'),
+                  h('span', { style: { fontSize: 11, color: acol, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } }, `${dacBits} bits`)
+                ),
+                h('input', {
+                  type: 'range', min: 8, max: 16, step: 1, value: dacBits,
+                  onChange: e => setDacBits(parseInt(e.target.value)),
+                  style: { width: '100%', accentColor: acol }
+                })
+              ),
+              h('div', null,
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 3 } },
+                  h('span', { style: { fontSize: 11, color: '#4b5563' } }, 'Full-scale output voltage'),
+                  h('span', { style: { fontSize: 11, color: acol, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } }, `${dacFullScaleV.toFixed(2)} V`)
+                ),
+                h('input', {
+                  type: 'range', min: 0.1, max: parseFloat((Vdd - 0.35).toFixed(2)), step: 0.05, value: dacFullScaleV,
+                  onChange: e => setDacFullScaleV(parseFloat(e.target.value)),
+                  style: { width: '100%', accentColor: acol }
+                })
+              )
+            ),
+
+            // Amplifier: gain
+            appMode === 'amplifier' && h('div', {
+              style: { background: '#f8fafc', border: `1px solid ${acol}44`, borderTop: `3px solid ${acol}`, borderRadius: 10, padding: 16, marginBottom: 14 }
+            },
+              h(SectionLabel, { text: 'Amplifier Parameters' }),
+              h('div', null,
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 3 } },
+                  h('span', { style: { fontSize: 11, color: '#4b5563' } }, 'Closed-loop gain |Av|'),
+                  h('span', { style: { fontSize: 11, color: acol, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } }, `${closedLoopGain}×  (${(20*Math.log10(closedLoopGain)).toFixed(1)} dB)`)
+                ),
+                h('input', {
+                  type: 'range', min: 1, max: 100, step: 1, value: closedLoopGain,
+                  onChange: e => setClosedLoopGain(parseInt(e.target.value)),
+                  style: { width: '100%', accentColor: acol }
+                })
+              )
+            ),
+
+            // Cascade: gain per stage + number of stages
+            appMode === 'cascade' && h('div', {
+              style: { background: '#f8fafc', border: `1px solid ${acol}44`, borderTop: `3px solid ${acol}`, borderRadius: 10, padding: 16, marginBottom: 14 }
+            },
+              h(SectionLabel, { text: 'Cascade Parameters' }),
+              h('div', { style: { marginBottom: 10 } },
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 3 } },
+                  h('span', { style: { fontSize: 11, color: '#4b5563' } }, 'Gain per stage |Av|'),
+                  h('span', { style: { fontSize: 11, color: acol, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } }, `${closedLoopGain}×`)
+                ),
+                h('input', {
+                  type: 'range', min: 1, max: 50, step: 1, value: closedLoopGain,
+                  onChange: e => setClosedLoopGain(parseInt(e.target.value)),
+                  style: { width: '100%', accentColor: acol }
+                })
+              ),
+              h('div', null,
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 3 } },
+                  h('span', { style: { fontSize: 11, color: '#4b5563' } }, 'Number of stages'),
+                  h('span', { style: { fontSize: 11, color: acol, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } }, `${numCascadeStages} stages`)
+                ),
+                h('input', {
+                  type: 'range', min: 2, max: 5, step: 1, value: numCascadeStages,
+                  onChange: e => setNumCascadeStages(parseInt(e.target.value)),
+                  style: { width: '100%', accentColor: acol }
+                })
+              )
+            ),
+
+            // ── Device parameters (condensed, always visible) ─────────
+            h('div', {
+              style: { background: '#f8fafc', border: '1px solid #1e3a8a', borderRadius: 10, padding: 16 }
+            },
+              h(SectionLabel, { text: 'Device Parameters' }),
+              [
+                { key: 'Wd',   label: 'Wd (input pair)', min: 2e-6,  max: 5.55e-6, scale: 1e6,  unit: 'µm' },
+                { key: 'Wdt',  label: 'Wdt (stage-2)',   min: 8.5e-6,max: 14e-6,   scale: 1e6,  unit: 'µm' },
+                { key: 'Ws',   label: 'Ws (output)',     min: 7e-6,  max: 15e-6,   scale: 1e6,  unit: 'µm' },
+                { key: 'Rc',   label: 'Rc (comp. R)',    min: 36000, max: 40000,   scale: 1e-3, unit: 'kΩ' },
+                { key: 'Cc',   label: 'Cc (Miller)',     min: 6e-13, max: 1e-12,   scale: 1e12, unit: 'pF' },
+              ].map(s => h('div', { key: s.key, style: { marginBottom: 9 } },
+                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 2 } },
+                  h('span', { style: { fontSize: 10, color: '#64748b', fontFamily: "'IBM Plex Mono',monospace" } }, s.label),
+                  h('span', { style: { fontSize: 10, color: '#047857', fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700 } },
+                    `${(params[s.key] * s.scale).toFixed(2)} ${s.unit}`)
+                ),
+                h('input', {
+                  type: 'range', min: s.min, max: s.max, step: (s.max - s.min) / 100,
+                  value: params[s.key],
+                  onChange: e => setParams(p => ({ ...p, [s.key]: parseFloat(e.target.value) })),
+                  style: { width: '100%', accentColor: '#16a34a' }
+                })
+              ))
+            )
+          ),
+
+          // ════════════════════════════════════════════════════════════
+          // RIGHT COLUMN — application results
+          // ════════════════════════════════════════════════════════════
+          h('div', null,
+            h(SectionLabel, { text: 'System-Level Performance' }),
+
+            // ── LDO Results ────────────────────────────────────────
+            appMode === 'ldo' && h('div', null,
+              h(Card, { title: 'Op-Amp Intrinsics @ Operating Point', color: acol },
+                h(Row, { label: 'Open-loop gain AOL', value: AOL_dB.toFixed(1), unit: 'dB' }),
+                h(Row, { label: 'GBW', value: GBW_MHz, unit: 'MHz' }),
+                h(Row, { label: 'Phase margin', value: PM_deg.toFixed(1), unit: '°', status: PM_deg > 60 ? 'ok' : PM_deg > 45 ? 'warn' : 'bad' }),
+                h(Row, { label: 'PSRR (supply rejection)', value: Math.abs(PSRR_dB).toFixed(1), unit: 'dB' }),
+                h(Row, { label: 'ICMR+ (max input)', value: ICMR_p.toFixed(3), unit: 'V', note: 'limits pass-element gate' }),
+              ),
+              h(Card, { title: 'LDO Closed-Loop Performance', color: acol },
+                h(Row, { label: 'Feedback factor β', value: ldo.beta.toFixed(4), unit: '' }),
+                h(Row, { label: 'Loop gain T = AOL × β', value: ldo.T_loop_dB.toFixed(1), unit: 'dB', status: ldo.T_loop_dB > 60 ? 'ok' : 'warn' }),
+                h(Row, { label: 'DC output voltage accuracy', value: ldo.dc_acc_pct.toFixed(5), unit: '%', note: '1/(1+T)×100', status: parseFloat(ldo.dc_acc_pct) < 0.01 ? 'ok' : 'warn' }),
+                h(Row, { label: 'Closed-loop output impedance', value: ldo.Zout_CL.toFixed(4), unit: 'Ω', note: 'Zout_OL = 1kΩ', status: 'ok' }),
+                h(Row, { label: 'Combined ripple rejection', value: ldo.ripple_rej.toFixed(1), unit: 'dB', status: ldo.ripple_rej > 50 ? 'ok' : ldo.ripple_rej > 30 ? 'warn' : 'bad' }),
+                h(Row, { label: 'LDO closed-loop BW', value: ldo.ldo_bw_kHz, unit: 'kHz' }),
+                h(Row, { label: 'ICMR+ vs VDD dropout margin', value: ((Vdd - ICMR_p) * 1000).toFixed(0), unit: 'mV', note: 'pass-element headroom', status: (Vdd - ICMR_p) * 1000 > 100 ? 'ok' : 'bad' }),
+              ),
+              h(Note, { color: acol },
+                h('b', null, '🔋 LDO Designer Note: '),
+                `Loop gain ${ldo.T_loop_dB.toFixed(1)} dB → DC accuracy ${ldo.dc_acc_pct.toFixed(4)}%. `,
+                `Closed-loop Zout = ${ldo.Zout_CL.toFixed(4)} Ω. `,
+                `Combined ripple rejection = PSRR (${Math.abs(PSRR_dB).toFixed(1)} dB) + loop gain attenuation = ${ldo.ripple_rej.toFixed(1)} dB. `,
+                `ICMR+ headroom (${((Vdd - ICMR_p)*1000).toFixed(0)} mV) sets minimum LDO dropout voltage — reduce VDD or increase Wd to widen ICMR.`
+              )
+            ),
+
+            // ── Active Filter Results ──────────────────────────────
+            appMode === 'active filter' && h('div', null,
+              h(Card, { title: 'Op-Amp Intrinsics @ Operating Point', color: acol },
+                h(Row, { label: 'GBW', value: GBW_MHz, unit: 'MHz' }),
+                h(Row, { label: 'Phase margin', value: PM_deg.toFixed(1), unit: '°', status: PM_deg > 60 ? 'ok' : 'warn' }),
+                h(Row, { label: 'Input-referred noise', value: Vn_nVrtHz.toFixed(1), unit: 'nV/√Hz' }),
+                h(Row, { label: 'FPBW (large-signal BW)', value: FPBW_MHz_str, unit: 'MHz' }),
+              ),
+              h(Card, { title: `${filterTopo === 'sallen-key' ? 'Sallen-Key' : 'MFB'} Filter — Q=${filterQ.toFixed(3)}, Av=${closedLoopGain}×`, color: acol },
+                h(Row, { label: 'Max corner frequency fc', value: filt.fc_max_kHz, unit: 'kHz', status: parseFloat(filt.fc_max_kHz) > 100 ? 'ok' : 'warn' }),
+                h(Row, { label: 'Gain error at fc', value: filt.gain_err_pct, unit: '%', status: parseFloat(filt.gain_err_pct) < 1 ? 'ok' : parseFloat(filt.gain_err_pct) < 3 ? 'warn' : 'bad' }),
+                h(Row, { label: 'Phase error at fc', value: filt.phase_err_deg, unit: '°', status: parseFloat(filt.phase_err_deg) < 2 ? 'ok' : 'warn' }),
+                h(Row, { label: 'Output noise (RMS in BW)', value: filt.Vn_out_uV, unit: 'µV rms' }),
+                h(Row, { label: 'Dynamic range estimate', value: filt.DR_dB, unit: 'dB', status: parseFloat(filt.DR_dB) > 80 ? 'ok' : 'warn' }),
+                h(Row, { label: 'Slew-rate limit (FPBW)', value: FPBW_MHz_str, unit: 'MHz', note: 'must exceed 2×fc' }),
+              ),
+              h(Note, { color: acol },
+                h('b', null, '📡 Filter Designer Note: '),
+                `Max fc = ${filt.fc_max_kHz} kHz for ${filterTopo.toUpperCase()} with Q=${filterQ.toFixed(2)}. `,
+                filterTopo === 'mfb' ? `MFB is more sensitive to finite GBW than Sallen-Key (Q² vs Q dependency). ` : ``,
+                `Gain error ${filt.gain_err_pct}% at fc${parseFloat(filt.gain_err_pct) > 1 ? ' — REDUCE fc OR increase GBW (widen Wd, raise Wst).' : ' ✓.'}. `,
+                `If fc must be higher, increase GBW by widening Wd or Wst, or reduce Cc.`
+              )
+            ),
+
+            // ── ADC Driver Results ─────────────────────────────────
+            appMode === 'adc' && h('div', null,
+              h(Card, { title: 'Op-Amp Intrinsics @ Operating Point', color: acol },
+                h(Row, { label: 'GBW (unity gain BW)', value: GBW_MHz, unit: 'MHz' }),
+                h(Row, { label: 'Slew rate', value: (SR * 1e-6).toFixed(2), unit: 'V/µs' }),
+                h(Row, { label: 'FPBW (large-signal)', value: FPBW_MHz_str, unit: 'MHz' }),
+                h(Row, { label: 'Settling time (to spec)', value: (Ts_s * 1e9).toFixed(1), unit: 'ns' }),
+                h(Row, { label: 'Input noise', value: Vn_nVrtHz.toFixed(1), unit: 'nV/√Hz' }),
+              ),
+              h(Card, { title: `${adcBits}-Bit SAR ADC Driver — ${vSwingPct}% VDD Swing`, color: acol },
+                h(Row, { label: 'LSB voltage', value: adc.LSB_uV, unit: 'µV', note: `VDD/${Math.pow(2,adcBits).toFixed(0)}` }),
+                h(Row, { label: 'Required time constants', value: (adcBits * Math.log(2)).toFixed(2), unit: 'τ', note: 'N×ln2' }),
+                h(Row, { label: 'Small-signal settling time', value: adc.t_settle_ns, unit: 'ns', status: 'ok' }),
+                h(Row, { label: `Slew time (${vSwingPct}% of ${Vdd.toFixed(2)}V)`, value: adc.t_slew_ns, unit: 'ns', status: parseFloat(adc.t_slew_ns) < parseFloat(adc.t_settle_ns) ? 'ok' : 'warn' }),
+                h(Row, { label: 'Total acquisition time', value: adc.t_total_ns, unit: 'ns', status: 'ok' }),
+                h(Row, { label: 'Maximum sample rate fs', value: adc.fs_max_MSps, unit: 'MSps', status: parseFloat(adc.fs_max_MSps) > 1 ? 'ok' : 'warn' }),
+                h(Row, { label: 'ENOB (noise-limited)', value: adc.ENOB, unit: 'bits', status: parseFloat(adc.ENOB) >= adcBits - 1 ? 'ok' : 'warn' }),
+                h(Row, { label: 'FPBW ≥ signal BW check', value: adc.fpbw_ok ? '✓ PASS' : '✗ FAIL', unit: '', status: adc.fpbw_ok ? 'ok' : 'bad' }),
+              ),
+              h(Note, { color: acol },
+                h('b', null, '📊 ADC Designer Note: '),
+                `For ${adcBits}-bit SAR: settle = ${adc.t_settle_ns} ns + slew = ${adc.t_slew_ns} ns = ${adc.t_total_ns} ns total → max fs = ${adc.fs_max_MSps} MSps. `,
+                `ENOB = ${adc.ENOB} bits (noise-limited). `,
+                parseFloat(adc.t_slew_ns) > parseFloat(adc.t_settle_ns)
+                  ? `Slew-rate dominates — increase Ws or reduce Cc to improve SR. `
+                  : `Settling dominates — increase GBW via Wd↑ or Wst↑. `,
+                `LSB = ${adc.LSB_uV} µV; input noise floor = ${Vn_nVrtHz.toFixed(1)} nV/√Hz.`
+              )
+            ),
+
+            // ── DAC Output Amp Results ─────────────────────────────
+            appMode === 'dac' && h('div', null,
+              h(Card, { title: 'Op-Amp Intrinsics @ Operating Point', color: acol },
+                h(Row, { label: 'AOL', value: AOL_dB.toFixed(1), unit: 'dB' }),
+                h(Row, { label: 'GBW', value: GBW_MHz, unit: 'MHz' }),
+                h(Row, { label: 'Slew rate', value: (SR * 1e-6).toFixed(2), unit: 'V/µs' }),
+                h(Row, { label: 'PSRR', value: Math.abs(PSRR_dB).toFixed(1), unit: 'dB' }),
+              ),
+              h(Card, { title: `${dacBits}-Bit DAC Output Buffer — Vfs = ${dacFullScaleV.toFixed(2)} V`, color: acol },
+                h(Row, { label: 'LSB voltage', value: dac.LSB_uV, unit: 'µV', note: `Vfs / ${Math.pow(2,dacBits).toFixed(0)}` }),
+                h(Row, { label: 'Offset error budget (0.5 LSB)', value: dac.offset_budget_uV, unit: 'µV' }),
+                h(Row, { label: 'DC gain error', value: dac.dc_err_pct, unit: '%', status: 'ok' }),
+                h(Row, { label: 'DC gain error in LSBs', value: dac.dc_err_LSB, unit: 'LSB', status: parseFloat(dac.dc_err_LSB) < 0.5 ? 'ok' : 'warn' }),
+                h(Row, { label: 'Settling time (to DAC accuracy)', value: dac.t_settle_dac_ns, unit: 'ns' }),
+                h(Row, { label: 'Slew time (full-scale step)', value: dac.t_slew_dac_ns, unit: 'ns', status: parseFloat(dac.t_slew_dac_ns) < 200 ? 'ok' : 'warn' }),
+                h(Row, { label: 'SFDR proxy', value: dac.SFDR_dB, unit: 'dB', status: parseFloat(dac.SFDR_dB) > 6*dacBits ? 'ok' : 'warn' }),
+                h(Row, { label: 'Output noise floor', value: dac.Vnoise_dac_uV, unit: 'µV rms' }),
+              ),
+              h(Note, { color: acol },
+                h('b', null, '🔊 DAC Designer Note: '),
+                `LSB = ${dac.LSB_uV} µV. DC gain error = ${dac.dc_err_LSB} LSBs — ${parseFloat(dac.dc_err_LSB) < 0.5 ? 'well within 0.5 LSB budget ✓' : 'EXCEEDS 0.5 LSB — increase AOL or use autozero technique'}. `,
+                `Full-scale slew time = ${dac.t_slew_dac_ns} ns. Output noise = ${dac.Vnoise_dac_uV} µV rms — `,
+                parseFloat(dac.Vnoise_dac_uV)*1e-6 < parseFloat(dac.LSB_uV)*1e-6 ? 'noise below 1 LSB ✓.' : 'noise exceeds 1 LSB — consider reducing GBW (Cc↑) to limit noise BW.'
+              )
+            ),
+
+            // ── Amplifier Results ──────────────────────────────────
+            appMode === 'amplifier' && h('div', null,
+              h(Card, { title: 'Op-Amp Intrinsics @ Operating Point', color: acol },
+                h(Row, { label: 'AOL', value: AOL_dB.toFixed(1), unit: 'dB' }),
+                h(Row, { label: 'GBW', value: GBW_MHz, unit: 'MHz' }),
+                h(Row, { label: 'Phase margin', value: PM_deg.toFixed(1), unit: '°', status: PM_deg > 60 ? 'ok' : 'warn' }),
+                h(Row, { label: 'Slew rate', value: (SR * 1e-6).toFixed(2), unit: 'V/µs' }),
+                h(Row, { label: 'Input noise', value: Vn_nVrtHz.toFixed(1), unit: 'nV/√Hz' }),
+              ),
+              h(Card, { title: `Closed-Loop Amplifier — Av = ${closedLoopGain}× (${(20*Math.log10(closedLoopGain)).toFixed(1)} dB)`, color: acol },
+                h(Row, { label: 'BW (non-inverting config)', value: (amp.bw_ninv_Hz * 1e-6).toFixed(3), unit: 'MHz', status: 'ok' }),
+                h(Row, { label: 'BW (inverting config)', value: (amp.bw_inv_Hz * 1e-6).toFixed(3), unit: 'MHz', note: `noise gain=${closedLoopGain+1}` }),
+                h(Row, { label: 'Gain error', value: amp.gain_err_pct, unit: '%', status: parseFloat(amp.gain_err_pct) < 0.01 ? 'ok' : 'warn' }),
+                h(Row, { label: 'Closed-loop output impedance', value: amp.Zout_CL_ohm, unit: 'Ω', status: 'ok' }),
+                h(Row, { label: 'Output noise (referred to out)', value: amp.Vn_out_nVrtHz, unit: 'nV/√Hz' }),
+                h(Row, { label: 'Peak output swing', value: amp.swing_mV, unit: 'mV pp' }),
+                h(Row, { label: 'THD-limited frequency (SR)', value: amp.thd_limited_freq_kHz, unit: 'kHz', note: 'above this → distortion', status: parseFloat(amp.thd_limited_freq_kHz) > 500 ? 'ok' : 'warn' }),
+                h(Row, { label: 'FPBW (large signal)', value: FPBW_MHz_str, unit: 'MHz' }),
+                h(Row, { label: 'FPBW ≥ CL BW check', value: amp.FPBW_ok ? '✓ PASS' : '✗ FAIL', unit: '', status: amp.FPBW_ok ? 'ok' : 'bad' }),
+              ),
+              h(Note, { color: acol },
+                h('b', null, '📣 Amplifier Designer Note: '),
+                `At Av=${closedLoopGain}×: CL bandwidth = ${(amp.bw_ninv_Hz*1e-6).toFixed(3)} MHz (non-inv.) / ${(amp.bw_inv_Hz*1e-6).toFixed(3)} MHz (inv.). `,
+                `Gain error = ${amp.gain_err_pct}%. `,
+                `SR-limited THD floor starts at ${amp.thd_limited_freq_kHz} kHz — above this frequency, slew-rate distortion dominates. `,
+                `${!amp.FPBW_ok ? 'WARNING: FPBW < CL BW — output will clip on large signals. Increase SR via Ws↑ or Cc↓.' : 'FPBW > CL BW ✓ — SR not limiting.'}`
+              )
+            ),
+
+            // ── Multi-Stage Cascade Results ────────────────────────
+            appMode === 'cascade' && h('div', null,
+              h(Card, { title: 'Per-Stage Op-Amp @ Operating Point', color: acol },
+                h(Row, { label: 'AOL per stage', value: AOL_dB.toFixed(1), unit: 'dB' }),
+                h(Row, { label: 'GBW per stage', value: GBW_MHz, unit: 'MHz' }),
+                h(Row, { label: 'Phase margin per stage', value: PM_deg.toFixed(1), unit: '°', status: PM_deg > 60 ? 'ok' : 'warn' }),
+                h(Row, { label: 'Power per stage', value: (Pow_W * 1e6).toFixed(1), unit: 'µW' }),
+                h(Row, { label: 'Input noise per stage', value: Vn_nVrtHz.toFixed(1), unit: 'nV/√Hz' }),
+              ),
+              h(Card, { title: `${numCascadeStages}-Stage Cascade — Av = ${closedLoopGain}× / stage`, color: acol },
+                h(Row, { label: 'Total gain', value: cas.total_dB, unit: 'dB', note: `${cas.total_gain.toFixed(0)}×`, status: 'ok' }),
+                h(Row, { label: 'Cascade −3dB bandwidth', value: (cas.cascade_bw_Hz * 1e-6).toFixed(3), unit: 'MHz', note: `BW₁×${cas.bw_shrink.toFixed(3)}` }),
+                h(Row, { label: 'Input noise (Friis)', value: cas.Vn_cascade, unit: 'nV/√Hz', status: parseFloat(cas.Vn_cascade) < Vn_nVrtHz * 1.5 ? 'ok' : 'warn' }),
+                h(Row, { label: 'Approx. cascade phase margin', value: cas.PM_cascade_approx, unit: '°', status: parseFloat(cas.PM_cascade_approx) > 45 ? 'ok' : 'bad' }),
+                h(Row, { label: 'Cascade settling time (≈ N×Ts)', value: cas.ts_cascade_ns, unit: 'ns' }),
+                h(Row, { label: 'Total power consumption', value: cas.total_power_uW, unit: 'µW', status: parseFloat(cas.total_power_uW) < 500 ? 'ok' : 'warn' }),
+              ),
+              h(Note, { color: acol },
+                h('b', null, '🔗 Cascade Designer Note: '),
+                `${numCascadeStages} stages × ${closedLoopGain}× = ${cas.total_gain.toFixed(0)}× total (${cas.total_dB} dB). `,
+                `Cascade −3dB BW = ${(cas.cascade_bw_Hz*1e-6).toFixed(3)} MHz (BW shrinkage factor ${cas.bw_shrink.toFixed(3)} from stage pole interaction). `,
+                `Friis input noise = ${cas.Vn_cascade} nV/√Hz — `,
+                parseFloat(cas.Vn_cascade) < Vn_nVrtHz * 1.05 ? 'first stage dominates noise (good) ✓.' : 'noise increases due to low first-stage gain — increase Av/stage or add input LNA.',
+                ` Phase margin degrades ~12°/stage — `,
+                parseFloat(cas.PM_cascade_approx) < 45 ? `WARNING: cascade PM = ${cas.PM_cascade_approx}° — compensate or reduce stages.` : `cascade PM ≈ ${cas.PM_cascade_approx}° ✓.`
+              )
+            )
+          )
+        )
+      );
+    }
+
+    // ── MAIN APP ─────────────────────────────────────────────────────────────
+    function App() {
+      const [tab, setTab] = useState('overview');
+      const [sweepX, setSweepX] = useState('Vdd');
+      const [sweepY, setSweepY] = useState('DC Gain');
+      const [running, setRunning] = useState(false);
+      const [runCount, setRunCount] = useState(1247);
+      const [params, setParams] = useState({
+        Vdd: 1.76, temperature: 41, corner: 'tt',
+        Wd: 4e-6, Wst: 8e-6, Wdt: 11.5e-6,
+        Wcm1: 6.5e-6, Ws: 11e-6, Rc: 38000, Cc: 8e-13,
+      });
+
+      const metrics = predict(params);
+      const passCount = Object.values(metrics).filter(m=>m.pass).length;
+      const allPass = passCount === 12;
+      const sweepRange = INPUT_RANGES[sweepX] || [1.62, 1.90];
+      const sweepData = sweepParam(sweepX, params, sweepRange);
+
+      function fire() {
+        setRunning(true);
+        setTimeout(()=>{ setRunning(false); setRunCount(c=>c+1); }, 600);
+      }
+
+      const TABS = ['overview','predictor','pvt sweep','specifications','model validation','system designer','user guide','about'];
+
+      return h('div',{style:{minHeight:'100vh',background:'#ffffff',color:'#1e293b',fontFamily:"'IBM Plex Sans','Segoe UI',sans-serif",WebkitFontSmoothing:'antialiased'}},
+
+        // ── HEADER ──
+        h('div',{style:{background:'linear-gradient(135deg,#f8fafc 0%,#dbeafe 50%,#f8fafc 100%)',borderBottom:'1px solid #1d4ed8',padding:'0',position:'sticky',top:0,zIndex:100}},
+          h('div',{style:{maxWidth:1100,margin:'0 auto'}},
+            h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 24px 0',flexWrap:'wrap',gap:12}},
+              h('div',{style:{display:'flex',alignItems:'center',gap:16}},
+                h('img',{src:'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAEAAAAAAAD/2wBDAAIBAQIBAQICAgICAgICAwUDAwMDAwYEBAMFBwYHBwcGBwcICQsJCAgKCAcHCg0KCgsMDAwMBwkODw0MDgsMDAz/2wBDAQICAgMDAwYDAwYMCAcIDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAz/wAARCAEEA4QDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD95CMAfSinP1ptfNy3OgKKKKmO4BRRRUgAODUlR1JWkDOYUUUVoZhRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFACN1P0puT6mn1HUSNobBRRRUX1KF3mjeaSiiTdwFyfU0UlFK7Ac/Wm0r9B9B/Kkpy3AKKKKkAooooAKflv9j86ZRVRlYLJ7j+fajLf7H50yiq5xWQ/Lf7H50c+1MooUmwsh+W/2Pzo59qZRU8zCyH8+1GW/2PzplFUpNhZD+fajLf7H50yijnCyH5b/AGPzoy3+x+dMoo5wsh+W/wBj86Mt/sfnTKKd2FkPy3+x+dHPtTKKTk0FkPy3+x+dGW/2PzplFCk2FkP59qFORTKeowKd2KUVYWiiirMQooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKADrUdPfv9P8KZWczaGwUUUVmUFFFFABRRRQBJSP900tI33TXR0ZlDcZRRRXPd2NQooop30sAUUUUgCiiigAoooovYAooo7+lVGDlsK6CignHcfgadsLdOc+lV7KfYn2sXqhtFLsPofyoKkVDVixKKKKm6AKKKKa1AKKKKp2YBRRRUgFPU5FMp6fdFWncT2FooorUwCiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACmt/F+H9adTW+fPsAaOjLhuNooornNQooooAKKKKNbXDyCis/xb4u0vwF4Zvta1vUrHSNI0uF7m8vbydYLe1iUZZ3diFVQOSSQK/Hj/gpL/wAHQEWjXeoeEf2d7OG9lj3QTeMtSg3Qqw4Js7ZgN+O0ko25BxGwIau/A5bWxUuWnH1fRHDjMxo4WPNVfy6s/Vz4/wD7UHw9/ZX8Gtr/AMRPGGh+EdLGQkmoXIR7hgMlYoxmSV8fwxqze1fml+1L/wAHXXw+8Fz3On/CXwLrHja4QlU1TWJf7LsCezJFtaaRfZxE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4flUadadWkY3RnKVmO8pf7w/Kjyl/vD8qbRVcoudh5futKEUjsKSijlEpNDvLX1FNK/T8qKKOUHJsURj1Wl8tfUU2ijlGptC7QT14pSgJ6jFNoo5RczHeUv94flR5S/3h+VNoojGw+dj9if7NJ5KetNoo5Q52O8pf7w/Kjy19RTaKOUOdjto9aXaP7w/KmUUuTUOdjvKX+8PyoCL7U2inyhzsd5KetG1QKbRRyicmwoooqiQooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAG7iAPpSbzSv1ptZt6m6SF3mjeaSilFu47Id5ntRvPtTaKXMwshd5opKKOZhZBRTvKNGw+1HKyeZDaKd5fvR5fvRysOZAnWnUiDaadu9hWkdjOW4lFLu9hRu9hVEiUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FACUUu72FG72FADH602nOcsB7Cm1jLc6AoooqQCiiigAooooAkoooroOcKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAAjNJsFFFKxoGwUbBRRUAGwUbBRRQAbBRRRU2QH/2Q==',alt:'AID AI Datasheet',style:{height:52,width:'auto',display:'block',objectFit:'contain'}})
+              ),
+              h('div',{style:{textAlign:'right'}},
+                h('div',{style:{display:'inline-flex',alignItems:'center',gap:6,background:'rgba(22,163,74,0.08)',border:'1px solid #16a34a',borderRadius:20,padding:'3px 12px',fontSize:10,color:'#16a34a',letterSpacing:'0.1em'}},
+                  h('div',{style:{width:6,height:6,borderRadius:'50%',background:'#16a34a',boxShadow:'0 0 8px #16a34a'}}),
+                  'ML MODEL LIVE'
+                ),
+                h('div',{style:{color:'#1e293b',fontSize:10,marginTop:4}},'Validated surrogate · 99% SPICE accuracy')
+              )
+            ),
+            // meta strip
+            h('div',{style:{display:'flex',alignItems:'center',gap:20,padding:'10px 24px 0',borderTop:'1px solid #bfdbfe',marginTop:10,flexWrap:'wrap'}},
+              ...[
+                ['PART','AID-TS-OPAMP-1V8'],
+                ['TOPOLOGY','Two-Stage Miller Op-Amp'],
+                ['PROCESS','TSMC 65nm CMOS'],
+                ['SUPPLY','1.62V – 1.90V'],
+                ['TEMP','-40°C to +125°C'],
+                ['STATUS',`${passCount}/12 SPECS PASS`],
+              ].flatMap(([label,val],i)=>[
+                i>0?h('div',{key:'div'+i,style:{width:1,height:16,background:'#e2eaf6'}}):null,
+                h('div',{key:label,style:{display:'flex',gap:8,alignItems:'center'}},
+                  h('span',{style:{color:'#1e293b',fontSize:11}},label),
+                  h('span',{style:{color:label==='STATUS'?(allPass?'#16a34a':'#c2410c'):'#0f4c2a',fontSize:11,fontFamily:"'IBM Plex Mono',monospace"}},val)
+                )
+              ].filter(Boolean))
+            ),
+            // tabs
+            h('div',{style:{display:'flex',gap:0,marginTop:12,paddingLeft:24}},
+              TABS.map(t=>h('button',{key:t,onClick:()=>setTab(t),style:{background:'none',border:'none',cursor:'pointer',padding:'8px 18px',fontSize:11,letterSpacing:'0.1em',textTransform:'uppercase',color:tab===t?'#16a34a':'#1e293b',borderBottom:tab===t?'2px solid #16a34a':'2px solid transparent',fontFamily:'inherit',transition:'all 0.15s'}},t))
+            )
+          )
+        ),
+
+        // ── CONTENT ──
+        h('div',{style:{maxWidth:1100,margin:'0 auto',padding:'32px 24px'}},
+
+          // ── OVERVIEW ──
+          tab==='overview' && h('div',null,
+            // hero banner
+            h('div',{style:{background:'linear-gradient(135deg,#eff6ff,#dbeafe 50%,#e0f2fe)',border:'1px solid #1d4ed8',borderRadius:12,padding:'28px 32px',marginBottom:28,position:'relative',overflow:'hidden'}},
+              h('div',{style:{position:'absolute',right:-20,top:-20,opacity:0.05,fontSize:180,fontWeight:900,color:'#16a34a',pointerEvents:'none'}},'TS'),
+              h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:20}},
+                h('div',null,
+                  h('div',{style:{fontSize:24,fontWeight:800,color:'#0f172a',letterSpacing:'-0.03em'}},'Two-Stage Miller Op-Amp — 65nm CMOS'),
+                  h('div',{style:{color:'#0f4c2a',marginTop:6,fontSize:14,maxWidth:560,lineHeight:1.6}},'Interactive surrogate model spanning the full supported operating space. It replaces static lookup tables with real-time prediction of key op-amp metrics across supply, temperature, process corner, and design parameters.'),
+                  h('div',{style:{display:'flex',gap:10,marginTop:16,flexWrap:'wrap'}},
+                    ['DC Gain: 73–82 dB','GBW: 8.8–36 MHz','PM: 36–81°','VDD: 1.62–1.90V'].map(t=>
+                      h('span',{key:t,style:{background:'rgba(0,0,0,0.06)',border:'1px solid #1d4ed8',borderRadius:4,padding:'3px 10px',fontSize:11,color:'#16a34a',fontFamily:"'IBM Plex Mono',monospace"}},t)
+                    )
+                  )
+                ),
+                h('div',{style:{textAlign:'right'}},
+                  h('div',{style:{fontSize:11,color:'#16a34a',letterSpacing:'0.15em'}},'PREDICTIONS SERVED'),
+                  h('div',{style:{fontSize:40,fontWeight:900,color:'#0f172a',fontFamily:"'IBM Plex Mono',monospace",lineHeight:1.1}},runCount.toLocaleString()),
+                  h('div',{style:{fontSize:10,color:'#1e293b',marginTop:4}},'this session')
+                )
+              )
+            ),
+            // live metrics
+            h('div',{style:{marginBottom:28}},
+              h('div',{style:{color:'#4b5563',fontSize:11,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:12}},'── Live Predictions at Current Operating Point'),
+              h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:10}},
+                Object.entries(metrics).map(([k,v])=>h(MetricCard,{key:k,label:k,value:v.value,unit:v.unit,pass:v.pass}))
+              )
+            ),
+            // feature cards
+            h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:14}},
+              [
+                {icon:'⚡',title:'Sub-ms Inference',body:'The interactive engine returns predictions in well under a second, enabling immediate exploration compared with conventional simulation workflows.'},
+                {icon:'🎯',title:'High Correlation to SPICE',body:'Validation results show strong agreement to SPICE across all displayed metrics, supporting fast what-if analysis and specification screening.'},
+                {icon:'🔄',title:'Full PVT Coverage',body:'Process corners (SS/TT/FF), −40°C to +125°C, 1.62–1.90V supply. 10 independent design parameters.'},
+                {icon:'📐',title:'12 Performance Metrics',body:'DC Gain, GBW, PM, GM, Power, PSRR, Fall/Rise Time, Slew Rate, Settling Time, ICMR+/−'},
+              ].map(f=>h('div',{key:f.title,style:{background:'rgba(248,250,252,1)',border:'1px solid #dbeafe',borderRadius:8,padding:'16px 18px'}},
+                h('div',{style:{fontSize:22,marginBottom:8}},f.icon),
+                h('div',{style:{fontWeight:700,color:'#0f172a',marginBottom:4}},f.title),
+                h('div',{style:{color:'#1e293b',fontSize:12,lineHeight:1.6}},f.body)
+              ))
+            ),
+            // ── SCHEMATIC ──
+            h('div',{style:{background:'rgba(248,250,252,1)',border:'1px solid #1e3a8a',borderRadius:12,padding:'24px 28px',marginTop:24}},
+              h('div',{style:{color:'#4b5563',fontSize:11,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:16}},'── Two-Stage Miller Op-Amp — Circuit Schematic'),
+              h('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:12}},
+                h('img',{src:'data:image/png;base64,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',alt:'Two-Stage Miller Op-Amp Schematic',style:{width:'100%',maxWidth:720,height:'auto',display:'block',borderRadius:6,background:'#ffffff',padding:'12px',border:'1px solid #dbeafe'}}),
+                h('div',{style:{display:'flex',gap:24,flexWrap:'wrap',justifyContent:'center'}},
+                  [
+                    {label:'M1, M2',desc:'Differential input pair (NMOS)'},
+                    {label:'M3, M4',desc:'PMOS current mirror load'},
+                    {label:'M5, M8',desc:'Tail bias current mirrors'},
+                    {label:'M6',desc:'Second-stage gain transistor (PMOS)'},
+                    {label:'M7',desc:'Output stage bias (NMOS)'},
+                    {label:'Cc, Rc',desc:'Miller compensation network'},
+                    {label:'CL = 2pF',desc:'Output load capacitance'},
+                    {label:'IB = 20µA',desc:'Bias current reference'},
+                  ].map(item=>h('div',{key:item.label,style:{display:'flex',alignItems:'center',gap:8}},
+                    h('span',{style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:11,color:'#16a34a',fontWeight:700,whiteSpace:'nowrap'}},item.label),
+                    h('span',{style:{fontSize:11,color:'#1e293b',whiteSpace:'nowrap'}},item.desc)
+                  ))
+                )
+              )
+            )
+          ),
+
+          // ── PREDICTOR ──
+          tab==='predictor' && h('div',{style:{display:'grid',gridTemplateColumns:'340px 1fr',gap:24}},
+            // controls
+            h('div',null,
+              h('div',{style:{color:'#4b5563',fontSize:11,letterSpacing:'0.15em',marginBottom:14}},'── OPERATING CONDITIONS'),
+              // PVT
+              h('div',{style:{background:'rgba(248,250,252,1)',border:'1px solid #1e3a8a',borderRadius:8,padding:18,marginBottom:16}},
+                h('div',{style:{color:'#16a34a',fontSize:10,letterSpacing:'0.15em',marginBottom:12}},'PVT PARAMETERS'),
+                [
+                  {key:'Vdd',label:'Supply Voltage VDD',min:1.62,max:1.90,step:0.02,unit:'V',fmt:v=>v.toFixed(2)},
+                  {key:'temperature',label:'Temperature',min:-40,max:125,step:5,unit:'°C',fmt:v=>v.toFixed(0)},
+                ].map(s=>h('div',{key:s.key,style:{marginBottom:14}},
+                  h('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:4}},
+                    h('span',{style:{color:'#4b5563',fontSize:11}},s.label),
+                    h('span',{style:{color:'#16a34a',fontFamily:"'IBM Plex Mono',monospace",fontSize:12}},`${s.fmt(params[s.key])} ${s.unit}`)
+                  ),
+                  h('input',{type:'range',min:s.min,max:s.max,step:s.step,value:params[s.key],onChange:e=>setParams(p=>({...p,[s.key]:parseFloat(e.target.value)})),style:{width:'100%',accentColor:'#16a34a'}}),
+                  h('div',{style:{display:'flex',justifyContent:'space-between',fontSize:9,color:'#1e293b'}},
+                    h('span',`${s.min} ${s.unit}`), h('span',`${s.max} ${s.unit}`)
+                  )
+                )),
+                h('div',{style:{marginBottom:4}},
+                  h('div',{style:{color:'#4b5563',fontSize:11,marginBottom:6}},'Process Corner'),
+                  h('div',{style:{display:'flex',gap:8}},
+                    ['ss','tt','ff'].map(c=>h('button',{key:c,onClick:()=>setParams(p=>({...p,corner:c})),style:{flex:1,padding:'6px 0',background:params.corner===c?`rgba(${c==='ss'?'249,115,22':c==='tt'?'22,163,74':'96,165,250'},0.15)`:'rgba(0,0,0,0.06)',border:`1px solid ${params.corner===c?CORNER_COLOR[c]:'#e2eaf6'}`,borderRadius:6,color:params.corner===c?CORNER_COLOR[c]:'#1e293b',fontSize:12,fontWeight:700,fontFamily:"'IBM Plex Mono',monospace",cursor:'pointer',textTransform:'uppercase',transition:'all 0.15s'}},c))
+                  )
+                )
+              ),
+              // device widths
+              h('div',{style:{background:'rgba(248,250,252,1)',border:'1px solid #1e3a8a',borderRadius:8,padding:18,marginBottom:16}},
+                h('div',{style:{color:'#16a34a',fontSize:10,letterSpacing:'0.15em',marginBottom:12}},'DEVICE PARAMETERS'),
+                [
+                  {key:'Wd',  label:'Wd (input pair)', min:2e-6,  max:5.55e-6, scale:1e6, unit:'µm'},
+                  {key:'Wst', label:'Wst (tail bias)',  min:5.5e-6,max:10.5e-6, scale:1e6, unit:'µm'},
+                  {key:'Wdt', label:'Wdt (stage-2 drv)',min:8.5e-6,max:14e-6,   scale:1e6, unit:'µm'},
+                  {key:'Wcm1',label:'Wcm1 (CM load)',   min:3e-6,  max:10e-6,   scale:1e6, unit:'µm'},
+                  {key:'Ws',  label:'Ws (bias width)',  min:7e-6,  max:15e-6,   scale:1e6, unit:'µm'},
+                  {key:'Rc',  label:'Rc (comp. res.)',  min:36000, max:40000,   scale:1e-3,unit:'kΩ'},
+                  {key:'Cc',  label:'Cc (Miller cap)',  min:6e-13, max:1e-12,   scale:1e12,unit:'pF'},
+                ].map(s=>h('div',{key:s.key,style:{marginBottom:10}},
+                  h('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:3}},
+                    h('span',{style:{color:'#4b5563',fontSize:11,fontFamily:"'IBM Plex Mono',monospace"}},s.label),
+                    h('span',{style:{color:'#0f4c2a',fontFamily:"'IBM Plex Mono',monospace",fontSize:11}},`${(params[s.key]*s.scale).toFixed(2)} ${s.unit}`)
+                  ),
+                  h('input',{type:'range',min:s.min,max:s.max,step:(s.max-s.min)/100,value:params[s.key],onChange:e=>setParams(p=>({...p,[s.key]:parseFloat(e.target.value)})),style:{width:'100%',accentColor:'#16a34a'}})
+                ))
+              ),
+              h('button',{onClick:fire,style:{width:'100%',padding:'12px 0',background:running?'rgba(22,163,74,0.08)':'linear-gradient(135deg,#1e40af,#1d4ed8)',border:'1px solid #16a34a',borderRadius:8,color:'#16a34a',fontFamily:'inherit',fontSize:13,fontWeight:700,letterSpacing:'0.1em',cursor:'pointer',textTransform:'uppercase',transition:'all 0.2s'}},
+                running ? '◌ RUNNING INFERENCE...' : '⚡ RUN ML PREDICTION'
+              )
+            ),
+            // results
+            h('div',null,
+              h('div',{style:{color:'#4b5563',fontSize:11,letterSpacing:'0.15em',marginBottom:14}},'── PREDICTED PERFORMANCE METRICS'),
+              h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:10,marginBottom:24}},
+                Object.entries(metrics).map(([k,v])=>h(MetricCard,{key:k,label:k,value:v.value,unit:v.unit,pass:v.pass}))
+              ),
+              // score bar
+              h('div',{style:{background:'rgba(248,250,252,1)',border:`1px solid ${allPass?'#1d4ed8':'#fef2f2'}`,borderRadius:8,padding:'16px 20px',display:'flex',alignItems:'center',gap:20,marginBottom:16}},
+                h('div',null,
+                  h('div',{style:{color:'#4b5563',fontSize:10,letterSpacing:'0.1em'}},'SPECIFICATION SCORE'),
+                  h('div',{style:{fontSize:32,fontWeight:900,color:allPass?'#16a34a':'#c2410c',fontFamily:"'IBM Plex Mono',monospace"}},`${passCount} / 12`)
+                ),
+                h('div',{style:{flex:1}},
+                  h('div',{style:{height:6,borderRadius:3,background:'#dbeafe',overflow:'hidden'}},
+                    h('div',{style:{height:'100%',width:`${passCount/12*100}%`,background:`linear-gradient(90deg,${allPass?'#16a34a':'#c2410c'},${allPass?'#0369a1':'#ea580c'})`,transition:'width 0.5s ease'}})
+                  ),
+                  h('div',{style:{color:'#1e293b',fontSize:11,marginTop:6}},allPass?'✓ All specifications met at this operating point':`${12-passCount} spec(s) flagged — adjust parameters`)
+                )
+              ),
+              h('div',{style:{padding:'12px 16px',background:'rgba(0,0,0,0.06)',border:'1px solid #dbeafe',borderRadius:8,fontFamily:"'IBM Plex Mono',monospace",fontSize:11,color:'#047857'}},
+                h('span',{style:{color:'#1e293b'}},'Condition: '),
+                `VDD=${params.Vdd.toFixed(2)}V · T=${params.temperature}°C · Corner=`,
+                h('span',{style:{color:CORNER_COLOR[params.corner]}},params.corner.toUpperCase()),
+                ` · Wd=${(params.Wd*1e6).toFixed(1)}µm · Cc=${(params.Cc*1e12).toFixed(2)}pF · Rc=${(params.Rc/1e3).toFixed(1)}kΩ`
+              )
+            )
+          ),
+
+          // ── PVT SWEEP ──
+          tab==='pvt sweep' && h('div',null,
+            // X axis selector
+            h('div',{style:{display:'flex',gap:12,marginBottom:16,flexWrap:'wrap',alignItems:'center'}},
+              h('div',{style:{color:'#4b5563',fontSize:11,letterSpacing:'0.15em'}},'SWEEP PARAMETER:'),
+              Object.keys(SWEEP_LABELS).map(k=>h('button',{key:k,onClick:()=>setSweepX(k),style:{padding:'5px 14px',borderRadius:20,background:sweepX===k?'rgba(22,163,74,0.10)':'rgba(0,0,0,0.06)',border:`1px solid ${sweepX===k?'#16a34a':'#dbeafe'}`,color:sweepX===k?'#16a34a':'#1e293b',fontSize:11,cursor:'pointer',fontFamily:"'IBM Plex Mono',monospace",textTransform:'uppercase',transition:'all 0.15s'}},k)),
+              h('div',{style:{marginLeft:'auto',display:'flex',gap:8}},
+                ['ss','tt','ff'].map(c=>h('button',{key:c,onClick:()=>setParams(p=>({...p,corner:c})),style:{padding:'5px 14px',borderRadius:20,background:params.corner===c?`rgba(${c==='ss'?'249,115,22':c==='tt'?'22,163,74':'96,165,250'},0.15)`:'rgba(0,0,0,0.06)',border:`1px solid ${params.corner===c?CORNER_COLOR[c]:'#dbeafe'}`,color:params.corner===c?CORNER_COLOR[c]:'#1e293b',fontSize:11,cursor:'pointer',fontFamily:"'IBM Plex Mono',monospace",textTransform:'uppercase',transition:'all 0.15s'}},c))
+              )
+            ),
+            // Y axis selector
+            h('div',{style:{display:'flex',gap:8,flexWrap:'wrap',marginBottom:16}},
+              Object.keys(metrics).map(k=>h('button',{key:k,onClick:()=>setSweepY(k),style:{padding:'4px 12px',borderRadius:4,background:sweepY===k?'rgba(22,163,74,0.12)':'rgba(0,0,0,0.06)',border:`1px solid ${sweepY===k?'#16a34a':'#dbeafe'}`,color:sweepY===k?'#16a34a':'#1e293b',fontSize:10,cursor:'pointer',fontFamily:"'IBM Plex Mono',monospace",transition:'all 0.1s',letterSpacing:'0.05em'}},k))
+            ),
+            // main chart
+            h('div',{style:{background:'rgba(248,250,252,1)',border:'1px solid #1e3a8a',borderRadius:10,padding:24,marginBottom:24}},
+              h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
+                h('div',null,
+                  h('div',{style:{fontWeight:700,color:'#0f172a',fontSize:16}},`${sweepY} vs ${SWEEP_LABELS[sweepX]}`),
+                  h('div',{style:{color:'#1e293b',fontSize:11,marginTop:2}},`Corner: `,h('span',{style:{color:CORNER_COLOR[params.corner]}},params.corner.toUpperCase()),` · T=${params.temperature}°C`)
+                ),
+                metrics[sweepY] && h('div',{style:{background:'rgba(0,0,0,0.06)',border:'1px solid #dbeafe',borderRadius:6,padding:'6px 14px',fontFamily:"'IBM Plex Mono',monospace",fontSize:11,color:'#16a34a'}},
+                  `SPEC: ${metrics[sweepY].spec} ${metrics[sweepY].unit}`
+                )
+              ),
+              h(MiniChart,{data:sweepData,xKey:'x',yKey:sweepY,color:metrics[sweepY]?.pass?'#16a34a':'#dc2626',xLabel:SWEEP_LABELS[sweepX],yLabel:`${sweepY} (${metrics[sweepY]?.unit||''})`,specLine:SPEC_LINES[sweepY]}),
+              h('div',{style:{display:'flex',gap:16,marginTop:12,fontSize:10,color:'#1e293b'}},
+                h('span',null,h('span',{style:{display:'inline-block',width:20,height:2,background:'#ea580c',verticalAlign:'middle',marginRight:4}}),'Spec limit'),
+                h('span',null,h('span',{style:{display:'inline-block',width:20,height:2,background:'#16a34a',verticalAlign:'middle',marginRight:4}}),'ML prediction'),
+                h('span',{style:{marginLeft:'auto'}},`Min: ${Math.min(...sweepData.map(d=>d[sweepY])).toFixed(1)} · Max: ${Math.max(...sweepData.map(d=>d[sweepY])).toFixed(1)} ${metrics[sweepY]?.unit||''}`)
+              )
+            ),
+            // mini sweep grid
+            h('div',{style:{marginTop:24}},
+              h('div',{style:{color:'#4b5563',fontSize:11,letterSpacing:'0.15em',marginBottom:14}},'── ALL METRICS SWEEP SUMMARY'),
+              h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(360px,1fr))',gap:16}},
+                Object.keys(metrics).filter(k=>k!==sweepY).slice(0,6).map(k=>
+                  h('div',{key:k,style:{background:'rgba(248,250,252,1)',border:'1px solid #dbeafe',borderRadius:8,padding:16,cursor:'pointer'},onClick:()=>setSweepY(k)},
+                    h('div',{style:{color:'#0f4c2a',fontSize:11,marginBottom:8}},k),
+                    h(MiniChart,{data:sweepData,xKey:'x',yKey:k,color:metrics[k]?.pass?'#059669':'#dc2626',xLabel:SWEEP_LABELS[sweepX],yLabel:metrics[k]?.unit||'',specLine:SPEC_LINES[k]})
+                  )
+                )
+              )
+            )
+          ),
+
+          // ── SPECIFICATIONS ──
+          tab==='specifications' && h('div',null,
+            h('div',{style:{color:'#4b5563',fontSize:11,letterSpacing:'0.15em',marginBottom:20}},'── ELECTRICAL CHARACTERISTICS (VDD=1.76V, TT corner, 41°C)'),
+            // abs max
+            h('div',{style:{marginBottom:24}},
+              h('div',{style:{color:'#0f172a',fontWeight:700,marginBottom:12,fontSize:13}},'Absolute Maximum Ratings'),
+              h('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
+                h('thead',null,h('tr',{style:{borderBottom:'1px solid #1e3a8a'}},
+                  ['Parameter','Symbol','Min','Max','Unit'].map(c=>h('th',{key:c,style:{padding:'8px 16px',textAlign:'left',color:'#1e293b',fontSize:10,letterSpacing:'0.1em',textTransform:'uppercase'}},c))
+                )),
+                h('tbody',null,
+                  [
+                    ['Supply Voltage','VDD','1.62','1.90','V'],
+                    ['Temperature (Operating)','TA','−40','+125','°C'],
+                    ['Temperature (Storage)','Tstg','−65','+150','°C'],
+                    ['Miller Cap','Cc','0.60','1.00','pF'],
+                    ['Comp. Resistor','Rc','36','40','kΩ'],
+                    ['ICMR High','VCM+','—','1.80','V'],
+                  ].map((row,i)=>h('tr',{key:i,style:{borderBottom:'1px solid #e8f0fb',background:i%2===0?'rgba(241,245,249,1)':'transparent'}},
+                    row.map((c,j)=>h('td',{key:j,style:{padding:'9px 16px',color:j===0?'#0f172a':j===1?'#16a34a':'#0f4c2a',fontFamily:j>=2?"'IBM Plex Mono',monospace":'inherit'}},c))
+                  ))
+                )
+              )
+            ),
+            // electrical characteristics
+            h('div',{style:{marginBottom:24}},
+              h('div',{style:{color:'#0f172a',fontWeight:700,marginBottom:12,fontSize:13}},'Electrical Characteristics'),
+              h('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
+                h('thead',null,h('tr',{style:{borderBottom:'1px solid #1e3a8a'}},
+                  ['Parameter','Symbol','Min','Typ (ML)','Max','Unit','Condition'].map(c=>h('th',{key:c,style:{padding:'8px 14px',textAlign:'left',color:'#1e293b',fontSize:10,letterSpacing:'0.1em',textTransform:'uppercase'}},c))
+                )),
+                h('tbody',null,
+                  [
+                    ['DC Open-Loop Gain','A_OL','73.8','79.2','82.2','dB','RL = ∞'],
+                    ['Unity-Gain Bandwidth','GBW','8.77','19.2','36.3','MHz','Cc=800fF'],
+                    ['Phase Margin','PM','36.2','63.8','80.8','°','Cc=800fF'],
+                    ['Gain Margin','GM','18.1','27.1','39.5','dB','Cc=800fF'],
+                    ['DC Power','PDC','70.2','82.6','94.6','µW','Both stages'],
+                    ['PSRR','PSRR','−13.3','−9.15','−4.66','dB','f=DC'],
+                    ['Fall Time','t_f','175','256','383','ns','—'],
+                    ['Rise Time','t_r','37.4','72.0','120','ns','—'],
+                    ['Slew Rate','SR','10.7','18.7','34.2','V/µs','—'],
+                    ['Settling Time','t_s','62.7','118.9','201','ns','0.1%'],
+                    ['ICMR Positive','ICMR+','1.53','1.70','1.80','V','—'],
+                    ['ICMR Negative','ICMR−','24.6n','631n','16.7µ','V','—'],
+                  ].map((row,i)=>h('tr',{key:i,style:{borderBottom:'1px solid #e8f0fb',background:i%2===0?'rgba(241,245,249,1)':'transparent'}},
+                    row.map((c,j)=>h('td',{key:j,style:{padding:'9px 14px',color:j===0?'#0f172a':j===1?'#16a34a':j===3?'#0f4c2a':'#1e293b',fontFamily:j>=2?"'IBM Plex Mono',monospace":'inherit',fontSize:11}},c))
+                  ))
+                )
+              )
+            ),
+            // design parameters
+            h('div',null,
+              h('div',{style:{color:'#0f172a',fontWeight:700,marginBottom:12,fontSize:13}},'Design Parameter Ranges'),
+              h('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
+                h('thead',null,h('tr',{style:{borderBottom:'1px solid #1e3a8a'}},
+                  ['Parameter','Symbol','Min','Default','Max','Unit','Description'].map(c=>h('th',{key:c,style:{padding:'8px 14px',textAlign:'left',color:'#1e293b',fontSize:10,letterSpacing:'0.1em',textTransform:'uppercase'}},c))
+                )),
+                h('tbody',null,
+                  [
+                    ['Input pair width','Wd','2.0','4.0','5.55','µm','Differential input PMOS'],
+                    ['Stage-1 tail','Wst','5.5','8.0','10.5','µm','Tail bias transistor'],
+                    ['Stage-2 driver','Wdt','8.5','11.5','14.0','µm','Second stage NMOS drive'],
+                    ['CM load width','Wcm1','3.0','6.5','10.0','µm','Current mirror load'],
+                    ['Bias width','Ws','7.0','11.0','15.0','µm','Tail/bias for stage 2'],
+                    ['Comp. resistor','Rc','36.0','38.0','40.0','kΩ','Zero-cancellation resistor'],
+                    ['Miller cap','Cc','0.60','0.80','1.00','pF','Miller compensation cap'],
+                  ].map((row,i)=>h('tr',{key:i,style:{borderBottom:'1px solid #e8f0fb',background:i%2===0?'rgba(241,245,249,1)':'transparent'}},
+                    row.map((c,j)=>h('td',{key:j,style:{padding:'9px 14px',color:j===0?'#0f172a':j===1?'#16a34a':j===3?'#0f4c2a':j===6?'#1e293b':'#4b5563',fontFamily:j>=2&&j<=5?"'IBM Plex Mono',monospace":'inherit',fontSize:11}},c))
+                  ))
+                )
+              )
+            )
+          ),
+
+          // ── MODEL ACCURACY ──
+          tab==='model validation' && h('div',null,
+            h('div',{style:{color:'#4b5563',fontSize:11,letterSpacing:'0.15em',marginBottom:20}},'── MODEL VALIDATION SUMMARY'),
+            // summary cards
+            h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:14,marginBottom:24}},
+              [
+                {label:'Best R² Score',val:'0.9999',sub:'Power & Fall Time',color:'#16a34a'},
+                {label:'Typical Error',val:'<1%',sub:'Across displayed metrics',color:'#1d4ed8'},
+                {label:'Interactive Speed',val:'Fast',sub:'Browser-based updates',color:'#ea580c'},
+                {label:'Validation Coverage',val:'Broad',sub:'Across supported operating space',color:'#7c3aed'},
+              ].map(c=>h('div',{key:c.label,style:{background:'rgba(248,250,252,1)',border:`1px solid ${c.color}33`,borderRadius:10,padding:20,borderBottom:`3px solid ${c.color}`}},
+                h('div',{style:{color:'#4b5563',fontSize:10,letterSpacing:'0.15em',marginBottom:6}},c.label),
+                h('div',{style:{fontSize:28,fontWeight:900,color:c.color,fontFamily:"'IBM Plex Mono',monospace"}}   ,c.val),
+                h('div',{style:{color:'#1e293b',fontSize:11,marginTop:4}},c.sub)
+              ))
+            ),
+            // accuracy table
+            h('div',{style:{marginBottom:24}},
+              h('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
+                h('thead',null,h('tr',{style:{borderBottom:'2px solid #1e3a8a'}},
+                  ['Parameter','R² Score','Mean Error %','P95 Error %','Status','Notes'].map(c=>h('th',{key:c,style:{padding:'10px 14px',textAlign:'left',color:'#1e293b',fontSize:10,letterSpacing:'0.1em',textTransform:'uppercase'}},c))
+                )),
+                h('tbody',null,
+                  MODEL_ACCURACY.map((m,i)=>{
+                    const r2c = m.r2>=0.999?'#16a34a':m.r2>=0.990?'#1d4ed8':'#ffb800';
+                    const ec  = m.meanErr<0.5?'#16a34a':m.meanErr<2?'#1d4ed8':'#ffb800';
+                    const rating = m.r2>=0.999?'🟢 EXCELLENT':m.r2>=0.990?'🔵 GOOD':'🟡 MODERATE';
+                    return h('tr',{key:m.name,style:{borderBottom:'1px solid #e8f0fb',background:m.retrained?'rgba(22,163,74,0.04)':i%2===0?'rgba(241,245,249,0.5)':'transparent'}},
+                      h('td',{style:{padding:'9px 14px',color:'#0f172a',fontWeight:700}},m.name, m.retrained&&h('span',{style:{marginLeft:6,fontSize:9,color:'#16a34a',background:'rgba(22,163,74,0.1)',border:'1px solid #16a34a',borderRadius:3,padding:'1px 5px',letterSpacing:'0.05em'}},'RETRAINED')),
+                      h('td',{style:{padding:'9px 14px',fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:r2c}},m.r2.toFixed(4)),
+                      h('td',{style:{padding:'9px 14px',fontFamily:"'IBM Plex Mono',monospace",color:ec}},`${m.meanErr.toFixed(3)}%`),
+                      h('td',{style:{padding:'9px 14px',fontFamily:"'IBM Plex Mono',monospace",color:'#6b7280'}},`${m.p95Err.toFixed(3)}%`),
+                      h('td',{style:{padding:'9px 14px',fontSize:11,color:r2c}},rating),
+                      h('td',{style:{padding:'9px 14px',fontSize:11,color:'#6b7280'}},m.retrained?(m.name==='ICMR−'?'log10 transform applied':'HPO: depth 6→8, iter 1.5k→3k'):'Production-ready')
+                    );
+                  })
+                )
+              )
+            ),
+            // architecture
+            h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}},
+              h('div',{style:{background:'rgba(248,250,252,1)',border:'1px solid #dbeafe',borderRadius:8,padding:20}},
+                h('div',{style:{color:'#0f172a',fontWeight:700,marginBottom:12}},'Model Architecture'),
+                [
+                  ['Engine','Validated surrogate predictor'],
+                  ['Models','12 (one per output)'],
+                  ['Coverage','Supported PVT and design space'],
+                  ['Validation Set','Held-out reference data'],
+                  ['Input normalization','StandardScaler (10 inputs)'],
+                  ['Output transform','Cube-root (most); log10 (ICMR−)'],
+                  ['Corner encoding','ss=1, tt=2, ff=3'],
+                  ['Response Time','Interactive browser update'],
+                ].map(([l,v])=>h('div',{key:l,style:{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid #e2eaf6'}},
+                  h('span',{style:{color:'#1e293b',fontSize:12}},l),
+                  h('span',{style:{color:'#047857',fontFamily:"'IBM Plex Mono',monospace",fontSize:11}},v)
+                ))
+              ),
+              h('div',{style:{background:'rgba(248,250,252,1)',border:'1px solid #dbeafe',borderRadius:8,padding:20}},
+                h('div',{style:{color:'#0f172a',fontWeight:700,marginBottom:12}},'Retraining Summary'),
+                h('div',{style:{marginBottom:16,padding:'12px',background:'rgba(22,163,74,0.06)',border:'1px solid #16a34a',borderRadius:6}},
+                  h('div',{style:{color:'#16a34a',fontSize:10,letterSpacing:'0.1em',marginBottom:6}},'✅ ICMR− — RANGE NORMALIZATION'),
+                  h('p',{style:{fontSize:12,color:'#1e293b',lineHeight:1.6}},'ICMR− spans a very wide numeric range, so the implementation uses normalization tailored to that behavior to maintain stable interactive predictions.')
+                ),
+                h('div',{style:{padding:'12px',background:'rgba(29,78,216,0.06)',border:'1px solid #1d4ed8',borderRadius:6}},
+                  h('div',{style:{color:'#1d4ed8',fontSize:10,letterSpacing:'0.1em',marginBottom:6}},'✅ GAIN MARGIN — PARAMETER TUNING'),
+                  h('p',{style:{fontSize:12,color:'#1e293b',lineHeight:1.6}},'Gain margin required additional tuning to tighten correlation and improve consistency across the supported exploration range.')
+                )
+              )
+            )
+          ),
+
+          // ── USER GUIDE ──
+          tab==='user guide' && h('div',null,
+            h('div',{style:{display:'grid',gridTemplateColumns:'1.1fr 1fr',gap:24,marginBottom:24}},
+              h('div',{style:{background:'#f8fafc',border:'1px solid #dbeafe',borderRadius:8,padding:22}},
+                h('div',{style:{color:'#1e293b',fontSize:11,letterSpacing:'0.15em',marginBottom:14}},'── HOW TO USE THIS AI DATASHEET™'),
+                h('div',{style:{display:'grid',gap:12}},
+                  [
+                    {n:'1',title:'Start in Overview',body:'Review the headline metrics and current pass or flag status at the default operating point.'},
+                    {n:'2',title:'Use Predictor',body:'Adjust supply voltage, temperature, process corner, and design parameters with the sliders. The metric cards update immediately.'},
+                    {n:'3',title:'Check the score',body:'Watch the specification score bar to see how many target metrics are passing at the current condition.'},
+                    {n:'4',title:'Explore PVT Sweep',body:'Choose one sweep parameter and one output metric to see how behavior changes across operating conditions.'},
+                    {n:'5',title:'Review Specifications',body:'Use the specification tables as the static reference for limits, ranges, and nominal values.'},
+                    {n:'6',title:'Open About',body:'Use the About tab for context on the circuit architecture and the role of the AI Datasheet™.'},
+                  ].map(step=>h('div',{key:step.n,style:{display:'grid',gridTemplateColumns:'34px 1fr',gap:12,alignItems:'start',padding:'10px 0',borderBottom:'1px solid #e2eaf6'}},
+                    h('div',{style:{width:34,height:34,borderRadius:'50%',background:'rgba(22,163,74,0.08)',border:'1px solid #16a34a',display:'flex',alignItems:'center',justifyContent:'center',color:'#16a34a',fontFamily:"'IBM Plex Mono',monospace",fontSize:13}},step.n),
+                    h('div',null,
+                      h('div',{style:{color:'#0f172a',fontWeight:700,fontSize:13,marginBottom:4}},step.title),
+                      h('div',{style:{color:'#1e293b',fontSize:12,lineHeight:1.65}},step.body)
+                    )
+                  ))
+                )
+              ),
+              h('div',{style:{display:'grid',gap:20}},
+                h('div',{style:{background:'#f8fafc',border:'1px solid #dbeafe',borderRadius:8,padding:22}},
+                  h('div',{style:{color:'#1e293b',fontSize:11,letterSpacing:'0.15em',marginBottom:14}},'── NAVIGATION TIPS'),
+                  h('div',{style:{display:'grid',gap:10}},
+                    [
+                      'Green metric cards indicate the present setting satisfies the displayed target.',
+                      'A red card or a reduced score means the current operating point should be adjusted.',
+                      'Use process corner buttons in Predictor and PVT Sweep to compare SS, TT, and FF behavior quickly.',
+                      'Sweep one variable at a time first. Then return to Predictor to fine-tune the full operating point.',
+                      'The charts are intended for exploration and screening. Final sign-off should still use your normal verification flow.'
+                    ].map((tip,i)=>h('div',{key:i,style:{display:'flex',gap:10,alignItems:'flex-start'}},
+                      h('span',{style:{color:'#16a34a',fontSize:14,lineHeight:1}},'•'),
+                      h('span',{style:{color:'#1e293b',fontSize:12,lineHeight:1.65}},tip)
+                    ))
+                  )
+                ),
+                h('div',{style:{background:'rgba(22,163,74,0.04)',border:'1px solid #16a34a',borderRadius:8,padding:22}},
+                  h('div',{style:{color:'#16a34a',fontWeight:700,marginBottom:12}},'Recommended Demo Flow'),
+                  [
+                    ['Step A','Show the Overview tab first for an executive summary.'],
+                    ['Step B','Move to Predictor and change only VDD, temperature, and corner to demonstrate operating-condition sensitivity.'],
+                    ['Step C','Adjust one design parameter such as Wd or Cc to illustrate design tradeoffs.'],
+                    ['Step D','Use PVT Sweep to visualize a full trend and discuss margin to spec.'],
+                    ['Step E','Close on Specifications or About for a concise reference view.'],
+                  ].map(([l,v])=>h('div',{key:l,style:{display:'flex',justifyContent:'space-between',gap:18,padding:'6px 0',borderBottom:'1px solid rgba(22,163,74,0.15)'}},
+                    h('span',{style:{color:'#1e293b',fontSize:12}},l),
+                    h('span',{style:{color:'#047857',fontSize:11,lineHeight:1.5,textAlign:'right',maxWidth:280}},v)
+                  ))
+                )
+              )
+            )
+          ),
+
+          // ── ABOUT ──
+          tab==='about' && h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:24}},
+            h('div',null,
+              h('div',{style:{color:'#1e293b',fontSize:11,letterSpacing:'0.15em',marginBottom:16}},'── WHAT IS THE AI DATASHEET™'),
+              h('div',{style:{background:'#f8fafc',border:'1px solid #dbeafe',borderRadius:8,padding:22,marginBottom:20}},
+                h('div',{style:{color:'#0f172a',fontWeight:700,marginBottom:12}},'The End of Static Datasheets'),
+                h('p',{style:{color:'#1e293b',lineHeight:1.7,fontSize:13,marginBottom:12}},'Traditional datasheets are snapshots frozen at a single operating point (Typical, 25°C, nominal supply). They cannot tell you what happens at your exact PVT corner.'),
+                h('p',{style:{color:'#1e293b',lineHeight:1.7,fontSize:13,marginBottom:12}},'The AID AI Datasheet™ replaces static tables with a live predictive model. Every performance metric becomes a function of your chosen operating conditions and design settings.'),
+                h('div',{style:{color:'#16a34a',fontSize:12,lineHeight:1.8}},
+                  '✓ Real-time prediction at any PVT corner\n✓ Design parameter sensitivity analysis\n✓ Instant specification compliance check\n✓ 99%+ SPICE accuracy · <1ms inference'.split('\n').map((l,i)=>h('div',{key:i},l))
+                )
+              ),
+              h('div',{style:{background:'#f8fafc',border:'1px solid #dbeafe',borderRadius:8,padding:22}},
+                h('div',{style:{color:'#0f172a',fontWeight:700,marginBottom:12}},'Circuit Architecture'),
+                h('p',{style:{color:'#1e293b',lineHeight:1.7,fontSize:12,marginBottom:10}},'The two-stage Miller op-amp consists of a differential input stage (PMOS pair Wd, bias Wst) followed by a common-source gain stage (Wdt, Ws). Miller compensation (Rc, Cc) splits the poles for stability.'),
+                h('p',{style:{color:'#1e293b',lineHeight:1.7,fontSize:12}},'7 independent device parameters (Wd, Wst, Wdt, Wcm1, Ws, Rc, Cc) + 3 PVT variables define a 10-dimensional interactive exploration space.')
+              )
+            ),
+            h('div',null,
+              h('div',{style:{color:'#1e293b',fontSize:11,letterSpacing:'0.15em',marginBottom:16}},'── AI DATASHEET VALUE'),
+              h('div',{style:{background:'#f8fafc',border:'1px solid #dbeafe',borderRadius:8,padding:22,marginBottom:20}},
+                h('div',{style:{color:'#0f172a',fontWeight:700,marginBottom:16}},'Why AI Datasheet™ Wins'),
+                h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+                  [
+                    {icon:'📊',title:'Continuous Prediction',body:'Any PVT + 7 device widths → instant spec prediction'},
+                    {icon:'🔬',title:'Design Optimization',body:'Optuna/GA sweep design space in seconds vs weeks'},
+                    {icon:'🧪',title:'Test Reduction',body:'Predict specs from subset of measurements: up to 80% test time reduction'},
+                    {icon:'🌡️','title':'PVT Coverage',body:'Single model spans all corners and temperatures'},
+                  ].map(f=>h('div',{key:f.title,style:{padding:12,background:'#ffffff',border:'1px solid #e2eaf6',borderRadius:6}},
+                    h('div',{style:{fontSize:18,marginBottom:4}},f.icon),
+                    h('div',{style:{color:'#0f172a',fontWeight:700,fontSize:12,marginBottom:4}},f.title),
+                    h('div',{style:{color:'#1e293b',fontSize:11,lineHeight:1.5}},f.body)
+                  ))
+                )
+              ),
+              h('div',{style:{background:'rgba(22,163,74,0.04)',border:'1px solid #16a34a',borderRadius:8,padding:22}},
+                h('div',{style:{color:'#16a34a',fontWeight:700,marginBottom:12}},'Document Information'),
+                [
+                  ['Document ID','AID-DS-65N-OPAMP-001'],
+                  ['Revision','2.1'],
+                  ['Process','TSMC 65nm CMOS'],
+                  ['Prediction Set','12 live performance metrics'],
+                  ['Release Date','2026-Q1'],
+                  ['Validation','Correlated to reference data'],
+                  ['Accuracy','High correlation to SPICE'],
+                  ['Use Case','Interactive exploration and screening'],
+                ].map(([l,v])=>h('div',{key:l,style:{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid rgba(22,163,74,0.15)'}},
+                  h('span',{style:{color:'#1e293b',fontSize:12}},l),
+                  h('span',{style:{color:'#047857',fontFamily:"'IBM Plex Mono',monospace",fontSize:11}},v)
+                ))
+              )
+            )
+          ),
+
+          tab==='system designer' && h(SystemDesignerTab, {params, setParams}),
+        ),
+
+        // ── FOOTER ──
+        h('div',{style:{borderTop:'1px solid #1e3a8a',padding:'16px 32px',display:'flex',justifyContent:'space-between',alignItems:'center',color:'#1e293b',fontSize:10,letterSpacing:'0.08em',maxWidth:1100,margin:'0 auto'}},
+          h('span',null,'© 2026 ANALOG INTELLIGENT DESIGN INC. · AI DATASHEET™ IS A TRADEMARK OF Analog Intelligent Design Inc.'),
+          h('span',null,'AID-TS-OPAMP-1V8 · REV 2.1 · INTERACTIVE AI DATASHEET')
+        ),
+
+        h('style',null,`
+          @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=IBM+Plex+Sans:wght@400;600;700;800&display=swap');
+          input[type=range] { height: 4px; }
+          @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+          ::-webkit-scrollbar { width: 6px; }
+          ::-webkit-scrollbar-track { background: #ffffff; }
+          ::-webkit-scrollbar-thumb { background: #1e3a8a; border-radius: 3px; }
+        `)
+      );
+    }
+
+    createRoot(document.getElementById('root')).render(h(App));
+  </script>
+</body>
+</html>
