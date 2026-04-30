@@ -3,28 +3,116 @@
 <head>
 <meta charset="UTF-8">
 <title>AID AI Datasheet™ — Demo Library</title>
+
 <style>
-  body { font-family: sans-serif; background: #0a0a1a; color: #fff; padding: 60px; }
-  h1 { font-family: sans-serif; color: #0066cc; margin-bottom: 8px; }
-  p { color: #aaa; margin-bottom: 40px; }
-  .card { background: #111827; border: 1px solid #1e3a5f; border-radius: 8px; 
-          padding: 24px 32px; margin: 16px 0; max-width: 600px; }
-  .card a { color: #00ccff; font-size: 18px; font-weight: 700; text-decoration: none; }
-  .card span { display: block; color: #aaa; font-size: 13px; margin-top: 6px; }
+  body {
+    font-family: sans-serif;
+    background: #0a0a1a;
+    color: #fff;
+    padding: 60px;
+  }
+
+  h1 {
+    color: #0066cc;
+    margin-bottom: 8px;
+  }
+
+  p {
+    color: #aaa;
+    margin-bottom: 40px;
+  }
+
+  h2 {
+    margin-top: 40px;
+    color: #00ccff;
+  }
+
+  .card {
+    background: #111827;
+    border: 1px solid #1e3a5f;
+    border-radius: 8px;
+    padding: 24px 32px;
+    margin: 16px 0;
+    max-width: 700px;
+  }
+
+  .card a {
+    color: #00ccff;
+    font-size: 18px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .card a:hover {
+    text-decoration: underline;
+  }
+
+  .card span {
+    display: block;
+    color: #aaa;
+    font-size: 13px;
+    margin-top: 6px;
+  }
 </style>
 </head>
+
 <body>
+
 <h1>AID AI Datasheet™ — Demo Library</h1>
-<p>Interactive AI-powered datasheets by Analog Intelligent Design Inc.</p>
+<p>Interactive AI-powered datasheets and ML-based circuit models by Analog Intelligent Design Inc.</p>
+
+<!-- Core Circuit Models -->
+<h2>Core AID Circuit Models</h2>
 
 <div class="card">
   <a href="opamp/">Folded Cascode Op-Amp</a>
-  <span>ML surrogate model · Interactive performance charts</span>
+  <span>ML surrogate model · Interactive performance charts · Optimization-ready</span>
 </div>
 
 <div class="card">
-  <a href="wurth/">Power Inductor</a>
-  <span>Inductance vs Current · Impedance vs Frequency · Live Z Calculator</span>
+  <a href="two-stage-opamp/">Two-Stage Op-Amp</a>
+  <span>Multi-parameter design exploration · Stability and gain tradeoffs</span>
+</div>
+
+<div class="card">
+  <a href="28nm%20VCO/">28nm VCO</a>
+  <span>Phase noise modeling · Frequency tuning · Advanced node behavior</span>
+</div>
+
+<!-- Component AI Datasheets -->
+<h2>Component AI Datasheets</h2>
+
+<div class="card">
+  <a href="Renesas/">Renesas ISL76682 Sensor</a>
+  <span>Temperature sensing behavior · Datasheet enhancement via ML</span>
+</div>
+
+<div class="card">
+  <a href="marki/">Marki ADM-11122PSM</a>
+  <span>RF mixer performance · Frequency-dependent behavior</span>
+</div>
+
+<div class="card">
+  <a href="narda-miteq/">Narda-MITEQ CLNA-40-0500-1000-5P</a>
+  <span>Low-noise amplifier · Gain, NF, and RF characteristics</span>
+</div>
+
+<!-- Würth Portfolio -->
+<h2>Würth Elektronik AI Datasheets</h2>
+
+<div class="card">
+  <a href="wurth/">Power Inductor (Original Demo)</a>
+  <span>Inductance vs Current · Impedance vs Frequency · Live Z calculator</span>
+</div>
+
+<div class="card">
+  <a href="wurth-WE-PMFI-8449xx/">WE-PMFI-74479xx Inductor</a>
+  <span>Bias-dependent inductance · Thermal effects · Frequency response</span>
+</div>
+
+<div class="card">
+  <a href="wurth-WL-OCPT-816/">WL-OCPT-816 Optocoupler</a>
+  <span>CTR modeling · VCE(sat) behavior · Multi-dimensional ML model</span>
 </div>
 
 </body>
