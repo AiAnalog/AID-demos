@@ -299,7 +299,49 @@ function renderChart(idx){
    const pts=finitePts(s,c.xLog,c.yLog).sort((a,b)=>a.x-b.x);
    let d=pts.map((p,i)=>(i?'L':'M')+sx(p.x).toFixed(2)+','+sy(p.y).toFixed(2)).join(' ');
    el('path',{d:d,fill:'none',stroke:COLORS[si%COLORS.length],'stroke-width':2.5,'stroke-linejoin':'round','stroke-linecap':'round'});
-   pts.filter((p,i)=>i%Math.max(1,Math.floor(pts.length/14))===0).forEach(p=>el('circle',{cx:sx(p.x),cy:sy(p.y),r:2.5,fill:COLORS[si%COLORS.length]}));
+   
+pts.filter((p,i)=>i%Math.max(1,Math.floor(pts.length/14))===0).forEach(p=>{
+   const dot=el('circle',{
+      cx:sx(p.x),
+      cy:sy(p.y),
+      r:5,
+      fill:COLORS[si%COLORS.length],
+      style:'cursor:pointer'
+   });
+
+   dot.addEventListener('mousemove',e=>{
+      let tip=document.getElementById('xyTip');
+      if(!tip){
+         tip=document.createElement('div');
+         tip.id='xyTip';
+         tip.style.position='fixed';
+         tip.style.zIndex='999999';
+         tip.style.background='rgba(0,0,0,0.88)';
+         tip.style.color='#fff';
+         tip.style.padding='6px 8px';
+         tip.style.borderRadius='6px';
+         tip.style.font='12px monospace';
+         tip.style.pointerEvents='none';
+         tip.style.whiteSpace='nowrap';
+         document.body.appendChild(tip);
+      }
+
+      tip.innerHTML =
+         '<b>'+s.label+'</b><br>' +
+         'x = ' + Number(p.x).toFixed(3).replace(/\\.000$/,'') + '<br>' +
+         'y = ' + Number(p.y).toFixed(3).replace(/\\.000$/,'');
+
+      tip.style.left=(e.clientX+12)+'px';
+      tip.style.top=(e.clientY+12)+'px';
+      tip.style.display='block';
+   });
+
+   dot.addEventListener('mouseleave',()=>{
+      const tip=document.getElementById('xyTip');
+      if(tip) tip.style.display='none';
+   });
+});
+
  });
  const leg=document.getElementById('legend'); leg.innerHTML='';
  c.series.forEach((s,i)=>{const sp=document.createElement('span'); sp.innerHTML='<i class="sw" style="background:'+COLORS[i%COLORS.length]+'"></i>'+s.label; leg.appendChild(sp);});
