@@ -15,7 +15,7 @@ These demos transform static component datasheets into fully self-contained HTML
 
 | Demo | Description |
 |------|-------------|
-| [WE-PMFI 74479320165110](https://aianalog.github.io/AID-demos/wurth-WE-PMFI-8449xx/) | Power inductor · Z(f, I_DC, T_amb) 3-parameter surrogate model |
+| [WE-PMFI 74479320165110](https://aianalog.github.io/AID-demos/wurth-WE-PMFI-74479xx/) | Power inductor · Z(f, I_DC, T_amb) 3-parameter surrogate model |
 | [WL-OCPT 816](https://aianalog.github.io/AID-demos/wurth-WL-OCPT-816/) | Phototransistor optocoupler · CTR, V_CE, switching |
 | [WE-PMFI 74479xx (Original)](https://aianalog.github.io/AID-demos/wurth/) | Power inductor · original demo version |
 
@@ -55,7 +55,7 @@ These demos transform static component datasheets into fully self-contained HTML
 
 | Demo | Description |
 |------|-------------|
-| [TLC072](https://aianalog.github.io/AID-demos/opamp/) | Op-amp · 20-chart redigitized datasheet, 3-way model comparison |
+| [Folded Cascode Op-Amp](https://aianalog.github.io/AID-demos/opamp/) | Interactive folded cascode topology design tool |
 | [Two-Stage Op-Amp](https://aianalog.github.io/AID-demos/two-stage-opamp/) | Interactive two-stage topology design tool |
 
 ---
