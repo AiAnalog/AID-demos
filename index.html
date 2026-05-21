@@ -27,8 +27,6 @@
     color: var(--text);
     min-height: 100vh;
   }
-
-  /* ── Animated grid overlay ── */
   body::before {
     content: '';
     position: fixed; inset: 0; z-index: 0;
@@ -38,10 +36,7 @@
     background-size: 40px 40px;
     pointer-events: none;
   }
-
   .wrap { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
-
-  /* ── Header ── */
   .header { text-align: center; margin-bottom: 3rem; }
   .logo-line {
     font-family: 'Orbitron', 'IBM Plex Mono', monospace;
@@ -54,20 +49,14 @@
   }
   .header h1 span { color: var(--blue); }
   .header p { font-size: 0.95rem; color: var(--muted); max-width: 560px; margin: 0 auto; line-height: 1.6; }
-
-  /* ── Section ── */
   .section { margin-bottom: 2.5rem; }
   .section-label {
     font-size: 11px; font-weight: 600; letter-spacing: 0.15em;
     text-transform: uppercase; color: var(--muted);
-    margin-bottom: 0.75rem; padding-left: 2px;
+    margin-bottom: 0.75rem;
     border-left: 3px solid var(--blue); padding-left: 10px;
   }
-
-  /* ── Grid ── */
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
-
-  /* ── Card ── */
   .card {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -92,7 +81,6 @@
     transform: translateY(-2px);
   }
   .card:hover::after { opacity: 1; right: 0.75rem; }
-
   .card-tag {
     font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -102,18 +90,8 @@
   }
   .card-tag.rf  { background: var(--tag-rf-bg); color: var(--tag-rf-text); }
   .card-tag.grn { background: var(--tag-green-bg); color: var(--tag-green-text); }
-
   .card-name { font-size: 0.9rem; font-weight: 600; color: var(--text); margin-bottom: 3px; }
   .card-sub  { font-size: 0.78rem; color: var(--muted); line-height: 1.4; }
-
-  /* ── Landing cards (full-width overview links) ── */
-  .card.overview {
-    border-left: 3px solid var(--green);
-    background: linear-gradient(135deg, #f0faf5 0%, #fff 60%);
-  }
-  .card.overview .card-tag.grn { background: var(--tag-green-bg); color: var(--tag-green-text); }
-
-  /* ── Footer ── */
   footer {
     text-align: center; margin-top: 3rem;
     font-size: 0.78rem; color: var(--muted);
@@ -124,7 +102,6 @@
 <body>
 <div class="wrap">
 
-  <!-- Header -->
   <div class="header">
     <div class="logo-line">Analog Intelligent Design Inc.</div>
     <h1>AID AI Datasheets<span>™</span></h1>
@@ -145,10 +122,10 @@
         <div class="card-name">WL-OCPT 816</div>
         <div class="card-sub">Phototransistor optocoupler · CTR, V_CE, switching</div>
       </a>
-      <a class="card overview" href="wurth/">
-        <span class="card-tag grn">Overview</span>
-        <div class="card-name">Würth Elektronik</div>
-        <div class="card-sub">Vendor landing page</div>
+      <a class="card" href="wurth/">
+        <span class="card-tag">Inductor</span>
+        <div class="card-name">WE-PMFI 74479xx (Original)</div>
+        <div class="card-sub">Power inductor · original demo version</div>
       </a>
     </div>
   </div>
@@ -167,10 +144,10 @@
         <div class="card-name">TIL19x-PE</div>
         <div class="card-sub">Photodiode-emitter variant</div>
       </a>
-      <a class="card overview" href="ISOCOM-TIL19x/">
-        <span class="card-tag grn">Overview</span>
-        <div class="card-name">ISOCOM TIL19x</div>
-        <div class="card-sub">Vendor landing page</div>
+      <a class="card" href="ISOCOM-TIL19x/">
+        <span class="card-tag">Optocoupler</span>
+        <div class="card-name">TIL19x-Design</div>
+        <div class="card-sub">TIL19x design AID AI Datasheet</div>
       </a>
     </div>
   </div>
@@ -184,10 +161,10 @@
         <div class="card-name">RAA2P300</div>
         <div class="card-sub">Automotive power management · bias, temp, load models</div>
       </a>
-      <a class="card overview" href="Renesas/">
-        <span class="card-tag grn">Overview</span>
-        <div class="card-name">Renesas</div>
-        <div class="card-sub">Vendor landing page</div>
+      <a class="card" href="Renesas/">
+        <span class="card-tag">Ambient Light</span>
+        <div class="card-name">Renesas ISL76682</div>
+        <div class="card-sub">Automotive ambient light sensor · register configurator, timing designer</div>
       </a>
     </div>
   </div>
@@ -231,7 +208,7 @@
       <a class="card" href="two-stage-opamp/">
         <span class="card-tag">Op-Amp</span>
         <div class="card-name">Two-Stage Op-Amp</div>
-        <div class="card-sub">Interactive topology design tool</div>
+        <div class="card-sub">Interactive two-stage topology design tool</div>
       </a>
     </div>
   </div>
