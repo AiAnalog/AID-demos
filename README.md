@@ -17,7 +17,7 @@ These demos transform static component datasheets into fully self-contained HTML
 |------|-------------|
 | [WE-PMFI 74479320165110](https://aianalog.github.io/AID-demos/wurth-WE-PMFI-8449xx/) | Power inductor · Z(f, I_DC, T_amb) 3-parameter surrogate model |
 | [WL-OCPT 816](https://aianalog.github.io/AID-demos/wurth-WL-OCPT-816/) | Phototransistor optocoupler · CTR, V_CE, switching |
-| [Würth Overview](https://aianalog.github.io/AID-demos/wurth/) | Vendor landing page |
+| [WE-PMFI 74479xx (Original)](https://aianalog.github.io/AID-demos/wurth/) | Power inductor · original demo version |
 
 ---
 
@@ -27,7 +27,7 @@ These demos transform static component datasheets into fully self-contained HTML
 |------|-------------|
 | [TIL19x-BE](https://aianalog.github.io/AID-demos/ISOCOM-TIL19x-BE/) | Optocoupler base-emitter variant · CTR, bandwidth, switching |
 | [TIL19x-PE](https://aianalog.github.io/AID-demos/ISOCOM-TIL19x-PE/) | Optocoupler photodiode-emitter variant |
-| [TIL19x Overview](https://aianalog.github.io/AID-demos/ISOCOM-TIL19x/) | Vendor landing page |
+| [TIL19x-Design](https://aianalog.github.io/AID-demos/ISOCOM-TIL19x/) | TIL19x design AID AI Datasheet |
 
 ---
 
@@ -36,7 +36,7 @@ These demos transform static component datasheets into fully self-contained HTML
 | Demo | Description |
 |------|-------------|
 | [RAA2P300](https://aianalog.github.io/AID-demos/Renesas-RAA2P300/) | Automotive power management · bias, temp, load models |
-| [Renesas Overview](https://aianalog.github.io/AID-demos/Renesas/) | Vendor landing page |
+| [Renesas ISL76682](https://aianalog.github.io/AID-demos/Renesas/) | Automotive ambient light sensor · register configurator, timing designer |
 
 ---
 
