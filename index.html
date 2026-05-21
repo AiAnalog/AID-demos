@@ -2,118 +2,245 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>AID AI Datasheet™ — Demo Library</title>
-
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AID AI Datasheets™ — Demo Repository</title>
 <style>
+  :root {
+    --bg: #f4f6f9;
+    --panel: #ffffff;
+    --blue: #0066cc;
+    --green: #0a8f5c;
+    --text: #1a1a2e;
+    --muted: #5a6a7a;
+    --border: #dde3ea;
+    --tag-bg: #e8f0fb;
+    --tag-text: #0055aa;
+    --tag-rf-bg: #fff3e0;
+    --tag-rf-text: #b05000;
+    --tag-green-bg: #e6f4ee;
+    --tag-green-text: #0a7a4e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: sans-serif;
-    background: #0a0a1a;
-    color: #fff;
-    padding: 60px;
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
   }
 
-  h1 {
-    color: #0066cc;
-    margin-bottom: 8px;
+  /* ── Animated grid overlay ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(0,102,204,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,102,204,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
   }
 
-  p {
-    color: #aaa;
-    margin-bottom: 40px;
+  .wrap { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+
+  /* ── Header ── */
+  .header { text-align: center; margin-bottom: 3rem; }
+  .logo-line {
+    font-family: 'Orbitron', 'IBM Plex Mono', monospace;
+    font-size: 11px; letter-spacing: 0.2em;
+    color: var(--blue); text-transform: uppercase; margin-bottom: 0.75rem;
+  }
+  .header h1 {
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    font-weight: 700; color: var(--text); margin-bottom: 0.5rem;
+  }
+  .header h1 span { color: var(--blue); }
+  .header p { font-size: 0.95rem; color: var(--muted); max-width: 560px; margin: 0 auto; line-height: 1.6; }
+
+  /* ── Section ── */
+  .section { margin-bottom: 2.5rem; }
+  .section-label {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.15em;
+    text-transform: uppercase; color: var(--muted);
+    margin-bottom: 0.75rem; padding-left: 2px;
+    border-left: 3px solid var(--blue); padding-left: 10px;
   }
 
-  h2 {
-    margin-top: 40px;
-    color: #00ccff;
-  }
+  /* ── Grid ── */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 
+  /* ── Card ── */
   .card {
-    background: #111827;
-    border: 1px solid #1e3a5f;
-    border-radius: 8px;
-    padding: 24px 32px;
-    margin: 16px 0;
-    max-width: 700px;
-  }
-
-  .card a {
-    color: #00ccff;
-    font-size: 18px;
-    font-weight: 700;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.1rem 1.25rem 1rem;
     text-decoration: none;
-  }
-
-  .card a:hover {
-    text-decoration: underline;
-  }
-
-  .card span {
+    color: inherit;
     display: block;
-    color: #aaa;
-    font-size: 13px;
-    margin-top: 6px;
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+    position: relative;
+    overflow: hidden;
   }
+  .card::after {
+    content: '→';
+    position: absolute; right: 1rem; bottom: 0.9rem;
+    font-size: 1rem; color: var(--blue);
+    opacity: 0; transition: opacity 0.2s, right 0.2s;
+  }
+  .card:hover {
+    border-color: var(--blue);
+    box-shadow: 0 4px 16px rgba(0,102,204,0.1);
+    transform: translateY(-2px);
+  }
+  .card:hover::after { opacity: 1; right: 0.75rem; }
+
+  .card-tag {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase;
+    background: var(--tag-bg); color: var(--tag-text);
+    padding: 3px 8px; border-radius: 20px;
+    display: inline-block; margin-bottom: 8px;
+  }
+  .card-tag.rf  { background: var(--tag-rf-bg); color: var(--tag-rf-text); }
+  .card-tag.grn { background: var(--tag-green-bg); color: var(--tag-green-text); }
+
+  .card-name { font-size: 0.9rem; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+  .card-sub  { font-size: 0.78rem; color: var(--muted); line-height: 1.4; }
+
+  /* ── Landing cards (full-width overview links) ── */
+  .card.overview {
+    border-left: 3px solid var(--green);
+    background: linear-gradient(135deg, #f0faf5 0%, #fff 60%);
+  }
+  .card.overview .card-tag.grn { background: var(--tag-green-bg); color: var(--tag-green-text); }
+
+  /* ── Footer ── */
+  footer {
+    text-align: center; margin-top: 3rem;
+    font-size: 0.78rem; color: var(--muted);
+  }
+  footer a { color: var(--blue); text-decoration: none; }
 </style>
 </head>
-
 <body>
+<div class="wrap">
 
-<h1>AID AI Datasheet™ — Demo Library</h1>
-<p>Interactive AI-powered datasheets and ML-based circuit models by Analog Intelligent Design Inc.</p>
+  <!-- Header -->
+  <div class="header">
+    <div class="logo-line">Analog Intelligent Design Inc.</div>
+    <h1>AID AI Datasheets<span>™</span></h1>
+    <p>Interactive, ML-augmented engineering datasheets. Continuous surrogate models across bias, frequency, and temperature — fully self-contained HTML.</p>
+  </div>
 
-<!-- Core Circuit Models -->
-<h2>Core AID Circuit Models</h2>
+  <!-- Würth Elektronik -->
+  <div class="section">
+    <div class="section-label">Würth Elektronik</div>
+    <div class="grid">
+      <a class="card" href="wurth-WE-PMFI-8449xx/">
+        <span class="card-tag">Inductor</span>
+        <div class="card-name">WE-PMFI 74479320165110</div>
+        <div class="card-sub">Power inductor · Z(f, I_DC, T_amb) 3-parameter model</div>
+      </a>
+      <a class="card" href="wurth-WL-OCPT-816/">
+        <span class="card-tag">Optocoupler</span>
+        <div class="card-name">WL-OCPT 816</div>
+        <div class="card-sub">Phototransistor optocoupler · CTR, V_CE, switching</div>
+      </a>
+      <a class="card overview" href="wurth/">
+        <span class="card-tag grn">Overview</span>
+        <div class="card-name">Würth Elektronik</div>
+        <div class="card-sub">Vendor landing page</div>
+      </a>
+    </div>
+  </div>
 
-<div class="card">
-  <a href="opamp/">Folded Cascode Op-Amp</a>
-  <span>ML surrogate model · Interactive performance charts · Optimization-ready</span>
+  <!-- ISOCOM -->
+  <div class="section">
+    <div class="section-label">ISOCOM</div>
+    <div class="grid">
+      <a class="card" href="ISOCOM-TIL19x-BE/">
+        <span class="card-tag">Optocoupler</span>
+        <div class="card-name">TIL19x-BE</div>
+        <div class="card-sub">Base-emitter variant · CTR, bandwidth, switching</div>
+      </a>
+      <a class="card" href="ISOCOM-TIL19x-PE/">
+        <span class="card-tag">Optocoupler</span>
+        <div class="card-name">TIL19x-PE</div>
+        <div class="card-sub">Photodiode-emitter variant</div>
+      </a>
+      <a class="card overview" href="ISOCOM-TIL19x/">
+        <span class="card-tag grn">Overview</span>
+        <div class="card-name">ISOCOM TIL19x</div>
+        <div class="card-sub">Vendor landing page</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- Renesas -->
+  <div class="section">
+    <div class="section-label">Renesas</div>
+    <div class="grid">
+      <a class="card" href="Renesas-RAA2P300/">
+        <span class="card-tag rf">Power IC</span>
+        <div class="card-name">RAA2P300</div>
+        <div class="card-sub">Automotive power management · bias, temp, load models</div>
+      </a>
+      <a class="card overview" href="Renesas/">
+        <span class="card-tag grn">Overview</span>
+        <div class="card-name">Renesas</div>
+        <div class="card-sub">Vendor landing page</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- RF / Microwave -->
+  <div class="section">
+    <div class="section-label">RF &amp; Microwave</div>
+    <div class="grid">
+      <a class="card" href="marki/">
+        <span class="card-tag rf">Amplifier</span>
+        <div class="card-name">Marki ADM-11122PSM</div>
+        <div class="card-sub">Wideband amplifier · 16-chart PCHIP surrogate</div>
+      </a>
+      <a class="card" href="qorvo-CMD319C3/">
+        <span class="card-tag rf">LNA / Switch</span>
+        <div class="card-name">Qorvo CMD319C3</div>
+        <div class="card-sub">GaAs MMIC · gain, NF, P1dB vs frequency &amp; bias</div>
+      </a>
+      <a class="card" href="narda-miteq/">
+        <span class="card-tag rf">Cryogenic LNA</span>
+        <div class="card-name">Narda-MITEQ CLNA</div>
+        <div class="card-sub">Bilinear grid interpolation · VT bias sliders</div>
+      </a>
+      <a class="card" href="28nm-VCO/">
+        <span class="card-tag rf">VCO</span>
+        <div class="card-name">28nm VCO</div>
+        <div class="card-sub">28nm CMOS voltage-controlled oscillator</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- Op-Amps / Analog -->
+  <div class="section">
+    <div class="section-label">Op-Amps &amp; Analog</div>
+    <div class="grid">
+      <a class="card" href="opamp/">
+        <span class="card-tag">Op-Amp</span>
+        <div class="card-name">TLC072</div>
+        <div class="card-sub">20-chart redigitized datasheet · 3-way model comparison</div>
+      </a>
+      <a class="card" href="two-stage-opamp/">
+        <span class="card-tag">Op-Amp</span>
+        <div class="card-name">Two-Stage Op-Amp</div>
+        <div class="card-sub">Interactive topology design tool</div>
+      </a>
+    </div>
+  </div>
+
 </div>
 
-<div class="card">
-  <a href="two-stage-opamp/">Two-Stage Op-Amp</a>
-  <span>Multi-parameter design exploration · Stability and gain tradeoffs</span>
-</div>
-
-<div class="card">
-  <a href="28nm%20VCO/">28nm VCO</a>
-  <span>Phase noise modeling · Frequency tuning · Advanced node behavior</span>
-</div>
-
-<!-- Component AI Datasheets -->
-<h2>Component AI Datasheets</h2>
-
-<div class="card">
-  <a href="Renesas/">Renesas ISL76682 Sensor</a>
-  <span>Temperature sensing behavior · Datasheet enhancement via ML</span>
-</div>
-
-<div class="card">
-  <a href="marki/">Marki ADM-11122PSM</a>
-  <span>RF mixer performance · Frequency-dependent behavior</span>
-</div>
-
-<div class="card">
-  <a href="narda-miteq/">Narda-MITEQ CLNA-40-0500-1000-5P</a>
-  <span>Low-noise amplifier · Gain, NF, and RF characteristics</span>
-</div>
-
-<!-- Würth Portfolio -->
-<h2>Würth Elektronik AI Datasheets</h2>
-
-<div class="card">
-  <a href="wurth/">Power Inductor (Original Demo)</a>
-  <span>Inductance vs Current · Impedance vs Frequency · Live Z calculator</span>
-</div>
-
-<div class="card">
-  <a href="wurth-WE-PMFI-8449xx/">WE-PMFI-74479xx Inductor</a>
-  <span>Bias-dependent inductance · Thermal effects · Frequency response</span>
-</div>
-
-<div class="card">
-  <a href="wurth-WL-OCPT-816/">WL-OCPT-816 Optocoupler</a>
-  <span>CTR modeling · VCE(sat) behavior · Multi-dimensional ML model</span>
-</div>
+<footer>
+  <p><a href="https://aianalog.co">aianalog.co</a> &nbsp;·&nbsp; AID AI Datasheets™ are fully self-contained HTML — no server required.</p>
+</footer>
 
 </body>
 </html>
