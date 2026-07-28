@@ -738,17 +738,7 @@
           <select id="vis-delay" onchange="drawTaps()">
           </select>
         </div>
-        <div class="selector-group">
-          <label>Temperature</label>
-          <select id="vis-temp" onchange="drawTaps()">
-            <option value="25">25°C (nominal)</option>
-            <option value="70">+70°C (Std max)</option>
-            <option value="85">+85°C (Opt.39 max)</option>
-            <option value="125">+125°C (Opt.ER max)</option>
-            <option value="-40">–40°C (Opt.39 min)</option>
-            <option value="-55">–55°C (Opt.ER min)</option>
-          </select>
-        </div>
+        
       </div>
 
       <canvas id="tapCanvas" height="220"></canvas>
@@ -761,15 +751,13 @@
             <th>Min Delay</th>
             <th>Max Delay</th>
             <th>Tolerance Applied</th>
-            <th>Estimated Tempco Shift</th>
+            
           </tr>
         </thead>
         <tbody id="tapTbody"></tbody>
       </table>
 
-      <div class="warn-box" style="margin-top:16px;">
-        <strong>Engineering estimate — not RCD characterized data:</strong> RCD does not publish a temperature drift curve for this series. The temperature shift column above uses a rough order-of-magnitude model based on general TTL/Schottky and LC delay line device physics. It is provided for preliminary planning only. For any temperature-sensitive application, characterize the actual part across your operating range or contact RCD Components for application support.
-      </div>
+      
     </div>
   </div>
   </div>
@@ -779,7 +767,7 @@
 
   <div id="panel-budget" class="panel">
     <div class="info-box" style="margin-top:4px;">
-      Enter your application timing requirements. The calculator identifies the nearest standard RCD part and shows the published tolerance. Temperature and load capacitance rows are <strong>rough engineering estimates only</strong> — RCD does not publish characterized data for these effects. Do not use estimated rows to make a final pass/fail determination. Verify with RCD or by characterizing the part in your application.
+      Enter your required delay and tolerance budget. The calculator identifies the nearest standard RCD part and computes the margin against the <strong>published RCD tolerance</strong> only. Temperature drift and load capacitance effects are not included — RCD does not publish characterized data for these effects. Contact RCD or characterize in your application.
     </div>
 
     <div class="section-title">Application Parameters</div>
@@ -789,20 +777,8 @@
         <input type="number" id="b-delay" placeholder="e.g. 100" min="1" max="1200">
       </div>
       <div class="calc-input-group">
-        <label>Delay Tolerance Budget (±ns)</label>
+        <label>Delay Tolerance Budget (&#177;ns)</label>
         <input type="number" id="b-tol" placeholder="e.g. 10" min="0.1">
-      </div>
-      <div class="calc-input-group">
-        <label>Operating Temp Range</label>
-        <select id="b-temp">
-          <option value="std">0 to +70°C (Standard)</option>
-          <option value="39">–40 to +85°C (Industrial)</option>
-          <option value="er">–55 to +125°C (Military/Aerospace)</option>
-        </select>
-      </div>
-      <div class="calc-input-group">
-        <label>Output Load Capacitance (pF)</label>
-        <input type="number" id="b-cap" placeholder="0 = no load (datasheet condition)" min="0" value="0">
       </div>
       <div class="calc-input-group">
         <label>Number of Taps Required</label>
@@ -898,17 +874,9 @@ function _tt(tapDelay) {
   return Math.max(2, tapDelay * 0.05);
 }
 
-function _ts(totalDelay_ns, temp_c) {
-  const deltaT = temp_c - 25;
-  const lcShift = totalDelay_ns * 0.0002 * deltaT;  
-  const stages = Math.round(totalDelay_ns / 2);
-  const schottkyShift = stages * 0.0005 * deltaT;    
-  return lcShift + schottkyShift;
-}
+function _ts() { return 0; }
 
-function _ls(cap_pF) {
-  return cap_pF * 0.07;
-}
+function _ls() { return 0; }
 
 function showPanel(id, btn) {
   document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
@@ -1049,11 +1017,11 @@ function updateVisDelays() {
 function _dt() {
   var key    = document.getElementById('vis-series').value;
   var total  = parseInt(document.getElementById('vis-delay').value);
-  var temp   = parseFloat(document.getElementById('vis-temp').value);
+  var temp   = 25;
   var series = _sm[key];
   var nTaps  = series.taps;
   var tapD   = total / nTaps;
-  var shift  = _ts(total, temp);
+  var shift  = 0;
 
   
   var canvas = document.getElementById('tapCanvas');
@@ -1131,8 +1099,6 @@ function _dt() {
     row.insertCell().innerHTML = '<span class="min-val">' + minD.toFixed(1) + ' ns</span>';
     row.insertCell().innerHTML = '<span class="max-val">' + maxD.toFixed(1) + ' ns</span>';
     row.insertCell().textContent = '±' + tolV.toFixed(1) + ' ns';
-    var sh = shift / nTaps * i;
-    row.insertCell().innerHTML = '<span style="color:' + (sh >= 0 ? 'var(--red)' : 'var(--midblue)') + ';">' + (sh >= 0 ? '+' : '') + sh.toFixed(2) + ' ns</span>';
   }
 
   
@@ -1145,8 +1111,6 @@ function _dt() {
 function runBudget() {
   var target  = parseFloat(document.getElementById('b-delay').value);
   var tolBudg = parseFloat(document.getElementById('b-tol').value);
-  var temp    = document.getElementById('b-temp').value;
-  var cap     = parseFloat(document.getElementById('b-cap').value) || 0;
   var taps    = parseInt(document.getElementById('b-taps').value);
   var pkg     = document.getElementById('b-pkg').value;
   var res     = document.getElementById('budget-result');
@@ -1157,63 +1121,43 @@ function runBudget() {
     return;
   }
 
-  
   var allD = taps === 10 ? _d10 : _d5b;
   var _nv = allD.reduce(function(prev, curr){
     return Math.abs(curr - target) < Math.abs(prev - target) ? curr : prev;
   });
 
-  
   var _ptl = _tt(_nv);
+  var tapDel = _nv / taps;
+  var tapTolVal = _tt(tapDel);
+  var margin = tolBudg - _ptl;
 
-  
-  var _tr = { std:[0,70], '39':[-40,85], er:[-55,125] };
-  var range = _tr[temp];
-  var shiftHot  = _ts(_nv, range[1]);
-  var shiftCold = _ts(_nv, range[0]);
-  var _wts = Math.max(Math.abs(shiftHot), Math.abs(shiftCold));
-
-  
-  var _ld = _ls(cap);
-
-  
-  var _tw = _ptl + _wts + _ld;
-  var margin = tolBudg - _tw;
-  var pass = margin >= 0;
-
-  
-  var _rb2 = '';
+  var recBase = '';
   if (taps === 10) {
-    _rb2 = pkg === 'smd' ? 'A1410AG' : 'A1410';
+    recBase = pkg === 'smd' ? 'A1410AG' : 'A1410';
   } else if (_nv <= 250 && pkg === 'smd') {
-    _rb2 = 'SMA1405';
+    recBase = 'SMA1405';
   } else if (_nv <= 500 && pkg === 'thru') {
-    _rb2 = 'A0805';
+    recBase = 'A0805';
   } else {
-    _rb2 = pkg === 'smd' ? 'A1405AG' : 'A1405';
+    recBase = pkg === 'smd' ? 'A1405AG' : 'A1405';
   }
-  var _oc = temp === 'er' ? '-ER' : temp === '39' ? '-39' : '';
-  var _rpn = _rb2 + '-' + _nv + 'NS' + _oc + '-W';
+  var _rpn = recBase + '-' + _nv + 'NS-W';
 
-  var html = '<h4>Timing Budget Analysis — ' + target + ' ns target</h4>';
-
+  var html = '<h4>Timing Budget Analysis &#8212; ' + target + ' ns target</h4>';
   var rows = [
-    ['Nearest standard delay', _nv + ' ns', 'published'],
-    ['Published tolerance (±2 ns or ±5%)', '±' + _ptl.toFixed(1) + ' ns', 'published'],
-    ['Estimated temp drift (' + range[0] + '°C to +' + range[1] + '°C) ★', '±' + _wts.toFixed(2) + ' ns', 'estimate'],
-    ['Estimated load shift (' + cap + ' pF) ★', '+' + _ld.toFixed(2) + ' ns', 'estimate'],
-    ['Published tol + estimates (indicative only)', '±' + _tw.toFixed(2) + ' ns', 'indicative'],
-    ['Your tolerance budget', '±' + tolBudg.toFixed(1) + ' ns', ''],
-    ['Indicative margin', (margin >= 0 ? '+' : '') + margin.toFixed(2) + ' ns', 'indicative']
+    ['Nearest standard delay',              _nv + ' ns',              'published'],
+    ['Published tolerance (&#177;2 ns or &#177;5%)', '&#177;' + _ptl.toFixed(1) + ' ns', 'published'],
+    ['Per-tap tolerance (nom)',              '&#177;' + tapTolVal.toFixed(1) + ' ns',      'published'],
+    ['Your tolerance budget',               '&#177;' + tolBudg.toFixed(1) + ' ns',        ''],
+    ['Margin vs. published tolerance',      (margin >= 0 ? '+' : '') + margin.toFixed(1) + ' ns', margin >= 0 ? 'pass' : 'warn'],
   ];
-
   rows.forEach(function(r){
-    var cls = r[2] === 'published' ? 'pass' : r[2] === 'estimate' ? 'warn' : '';
+    var cls = r[2] === 'published' ? 'pass' : r[2] === 'warn' ? 'warn' : '';
     html += '<div class="budget-row"><span class="label">' + r[0] + '</span><span class="value ' + cls + '">' + r[1] + '</span></div>';
   });
 
-  html += '<div class="recommended-pn">Nearest Standard Part: <strong>' + _rpn + '</strong><br><span style="font-size:12px; opacity:0.7;">Lead-free (W), ' + _nv + ' ns, ' + taps + '-tap — verify availability at rcdcomponents.com</span></div>';
-  html += '<div class="warn-box" style="margin-top:12px;"><strong>★ Estimated rows are not RCD-characterized data.</strong> Temperature drift and load capacitance effects are order-of-magnitude estimates based on general TTL/Schottky device physics. The "indicative margin" above is a planning guide only — it is not a verified pass/fail determination. Contact RCD Components or characterize the part in your application before committing to a design.</div>';
+  html += '<div class="recommended-pn">Nearest Standard Part: <strong>' + _rpn + '</strong><br><span style="font-size:12px;opacity:0.7;">Lead-free (W), ' + _nv + ' ns, ' + taps + '-tap &#8212; verify availability at rcdcomponents.com</span></div>';
+  html += '<div class="info-box" style="margin-top:12px; font-size:13px;"><strong>Note:</strong> This budget shows published RCD tolerance only. It does not include temperature drift or load capacitance effects, which RCD does not characterize. For applications sensitive to those effects, contact RCD Components or characterize the part in your system.</div>';
 
   res.className = 'calc-result show';
   res.innerHTML = html;
